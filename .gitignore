@@ -1,1 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Test / coverage / pytest
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+*.log
+
+# Virtual environments
+.env/
+.venv/
+env/
+venv/
+
+# MacOS
 .DS_Store
+
+# IDE / Editor files
+.idea/
+.vscode/
+
+# CBZ / manga output (optional, if generated)
+*.cbz
