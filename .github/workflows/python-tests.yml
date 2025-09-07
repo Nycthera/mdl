@@ -29,4 +29,6 @@ jobs:
         pip install pytest rich requests
 
     - name: Run tests
-      run: pytest -v
+      run: |
+        PYTHONPATH=. pytest -v
+
