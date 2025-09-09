@@ -49,7 +49,8 @@ def cprint(msg, color=Colors.RESET):
 BASE_URLS = [
     "https://scans.lastation.us/manga/",
     "https://official.lowee.us/manga/",
-    "https://hot.planeptune.us/manga/"
+    "https://hot.planeptune.us/manga/",
+    "https://scans-hot.planeptune.us/"
 ]
 
 session = requests.Session()
