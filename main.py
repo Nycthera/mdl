@@ -50,7 +50,7 @@ BASE_URLS = [
     "https://scans.lastation.us/manga/",
     "https://official.lowee.us/manga/",
     "https://hot.planeptune.us/manga/",
-    "https://scans-hot.planeptune.us/"
+    "https://scans-hot.planeptune.us/manga"
 ]
 
 session = requests.Session()
