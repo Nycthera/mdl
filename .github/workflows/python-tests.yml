@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: arch-latest
 
     strategy:
       matrix:
@@ -31,4 +31,10 @@ jobs:
     - name: Run tests
       run: |
         PYTHONPATH=. pytest -v
+
+    - name: me being bored
+      run: |
+        echo " --- IGNORE --- "
+        neofetch
+        echo " --- IGNORE --- "
 
