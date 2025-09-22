@@ -25,3 +25,7 @@ venv/
 
 # CBZ / manga output (optional, if generated)
 *.cbz
+
+build
+dist
+main.spec
