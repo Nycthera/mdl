@@ -53,6 +53,9 @@ The Manga API is a powerful tool for accessing manga-related information. Whethe
 
 ---
 
+### Credits
+Uses a manga api by FireFlyDeveloper
+
 ## Getting Started
 
 1. Clone the repository:
