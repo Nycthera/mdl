@@ -1,3 +1,6 @@
+<<<<<<< HEAD
+node_modules/
+=======
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -29,3 +32,4 @@ venv/
 build
 dist
 main.spec
+>>>>>>> origin/main
