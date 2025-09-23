@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Manga API
 
 The Manga API is a powerful tool for accessing manga-related information. Whether you're building a manga-centric application or exploring the world of manga data, this API provides a variety of features to suit your needs.
@@ -59,6 +58,3 @@ The Manga API is a powerful tool for accessing manga-related information. Whethe
 1. Clone the repository:
    ```bash
    git clone https://github.com/FireFlyDeveloper/Manga-API.git
-=======
-# mdl
->>>>>>> origin/main
