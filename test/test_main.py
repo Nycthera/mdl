@@ -117,4 +117,8 @@ def test_download_all_pages(tmp_path, monkeypatch):
     
     download_all_pages(urls_to_download, max_workers=2, manga_name="test-manga")
     for i in range(3):
+<<<<<<< HEAD
         assert (folder / f"{i}.png").exists()
+=======
+        assert (folder / f"{i}.png").exists()
+>>>>>>> ef4d9e0 (idk what to do here bruh)
