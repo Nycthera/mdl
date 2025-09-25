@@ -443,7 +443,15 @@ def main():
 
     # Determine clean manga name
     if manga_name.startswith("http") and "mangadex" in manga_name.lower():
-        download_md_chapters(manga_name, lang=md_lang)
+        download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
+        manga_name_clean = get_manga_name_from_md(manga_name, lang=md_lang)
+        manga_name_clean = sanitize_folder_name(manga_name_clean)
+        download_md_chapters(
+            manga_url=manga_name,
+            lang=md_lang,
+            create_cbz=cbz_flag,
+            manga_name_clean=manga_name_clean
+        )
     else:
         manga_name_clean = extract_manga_name_from_url(manga_name)
         manga_name_clean = sanitize_folder_name(manga_name_clean)
