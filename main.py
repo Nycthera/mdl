@@ -450,7 +450,6 @@ def main():
             manga_url=manga_name,
             lang=md_lang,
             create_cbz=cbz_flag,
-            manga_name_clean=manga_name_clean
         )
     else:
         manga_name_clean = extract_manga_name_from_url(manga_name)
