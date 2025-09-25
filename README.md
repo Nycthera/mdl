@@ -43,11 +43,15 @@ The Manga API is a powerful tool for accessing manga-related information. Whethe
 - **Method:** `GET`
 - **Description:** Returns a list of the latest manga with details including manga ID, image, title, latest chapter, and more. Supports pagination.
 
+<<<<<<< HEAD
 ### Credits
 
 Uses a manga api by FireFlyDeveloper
 
+=======
+>>>>>>> 4151cc0 (Update README.md to enhance endpoint descriptions and unify parameter formatting)
 ### Credits
+
 Uses a manga api by FireFlyDeveloper
 
 ## Getting Started
