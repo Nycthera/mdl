@@ -15,8 +15,7 @@ from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn
 import threading
 import re
-
-
+from collections import defaultdict
 
 # ------------------ CONFIG PATH ------------------
 def get_config_path():
@@ -58,10 +57,6 @@ BASE_URLS = [
 ]
 
 API_ENDPOINT = "https://api.mangadex.org"
-md_output_folder = ""
-md_manga_name = ""
-md_manga_uuid = ""
-
 session = requests.Session()
 session.headers.update({"User-Agent": "Mozilla/5.0"})
 
@@ -109,6 +104,28 @@ def url_exists(url):
     except:
         return False
 
+# ------------------ RATE LIMITER ------------------
+class RateLimiter:
+    def __init__(self, max_calls=5, per_seconds=1):
+        self.max_calls = max_calls
+        self.per_seconds = per_seconds
+        self.lock = threading.Lock()
+        self.calls = defaultdict(list)
+
+    def acquire(self, key="global"):
+        with self.lock:
+            now = time.time()
+            calls = self.calls[key]
+            while calls and calls[0] <= now - self.per_seconds:
+                calls.pop(0)
+            if len(calls) >= self.max_calls:
+                sleep_for = self.per_seconds - (now - calls[0])
+                time.sleep(max(sleep_for, 0))
+            self.calls[key].append(time.time())
+
+rate_limiter = RateLimiter(max_calls=5, per_seconds=1)
+rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
+
 # ------------------ DOWNLOAD ------------------
 def download_image(url, folder, max_retries=5, backoff_factor=1.0):
     if stop_signal:
@@ -136,31 +153,39 @@ def download_image(url, folder, max_retries=5, backoff_factor=1.0):
             return f"{Colors.RED}Unexpected error for {filename}: {e}{Colors.RESET}"
 
 # ------------------ CBZ ------------------
-def create_cbz_for_all(manga_name):
-    manga_folder_name = manga_name.replace("-", " ").replace("_", " ")
-    os.makedirs(manga_folder_name, exist_ok=True)
-    cbz_path = os.path.join(manga_folder_name, f"{manga_folder_name}.cbz")
-    console.print(f"[magenta]Creating CBZ archive: {cbz_path}[/]")
-    with zipfile.ZipFile(cbz_path, 'w') as cbz:
-        for root, _, files in os.walk(manga_folder_name):
+def create_cbz_for_all(folder_path, delete_folder=True):
+    folder_path = sanitize_folder_name(folder_path)
+    cbz_name = f"{folder_path}.cbz"
+    console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
+
+    with zipfile.ZipFile(cbz_name, 'w') as cbz:
+        for root, _, files in os.walk(folder_path):
             files = sorted(files)
             for file in files:
                 file_path = os.path.join(root, file)
-                if file_path == cbz_path:
+                if file_path == cbz_name:
                     continue
-                arcname = os.path.relpath(file_path, manga_folder_name)
+                arcname = os.path.relpath(file_path, folder_path)
                 cbz.write(file_path, arcname=arcname)
-    console.print(f"[magenta]Created {cbz_path}[/]")
 
-    for root, dirs, _ in os.walk(manga_folder_name):
-        for d in dirs:
-            shutil.rmtree(os.path.join(root, d))
-    console.print(f"[green]Cleaned chapter folders in {manga_folder_name}[/]")
+    console.print(f"[magenta]Created {cbz_name}[/]")
+
+    if delete_folder:
+        try:
+            shutil.rmtree(folder_path)
+            console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
+        except Exception as e:
+            console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
+
+# ----------- sanitize manga name -----------
+def sanitize_folder_name(name: str) -> str:
+    """Remove illegal characters from folder/file names."""
+    return re.sub(r'[<>:"/\\|?*]', "_", name)
 
 # ------------------ URL GATHERING WITH PROGRESS ------------------
 def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max_decimals=5, workers=10):
     urls_to_download = []
-    folder_base = manga_name.replace("-", " ").replace("_", " ")
+    folder_base = sanitize_folder_name(manga_name)
     console.print(f"[yellow]Gathering pages for {manga_name}...[/]")
 
     chapter = start_chapter
@@ -228,16 +253,14 @@ def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max
 
     return urls_to_download
 
-# ------------------ DOWNLOAD WITH PAGES/SEC ------------------
+# ------------------ DOWNLOAD WITH PROGRESS ------------------
 def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
-    manga_folder_name = manga_name.replace("-", " ").replace("_", " ")
+    manga_folder_name = sanitize_folder_name(manga_name)
     total_pages = len(urls_to_download)
     if total_pages == 0:
         return
 
     start_time = time.time()
-
-    # Pre-create all folders
     for _, folder in urls_to_download:
         os.makedirs(folder, exist_ok=True)
 
@@ -264,13 +287,6 @@ def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
                 progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
                 if "Failed" in result or "HTTP" in result:
                     console.print(result)
-                    
-# ----------- sanitize manga name -----------
-def sanitize_folder_name(name: str) -> str:
-    """Remove illegal characters from folder/file names."""
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
-
-
 
 # ------------------ MANGADEX FUNCTIONS ------------------
 def extract_manga_uuid(url: str) -> str:
@@ -289,6 +305,7 @@ def fetch_all_chapters_md(manga_uuid: str, lang="en"):
     offset = 0
 
     while True:
+        rate_limiter_athome.acquire("mangadex_api")
         params = {
             "manga": manga_uuid,
             "translatedLanguage[]": lang,
@@ -297,8 +314,12 @@ def fetch_all_chapters_md(manga_uuid: str, lang="en"):
             "order[chapter]": "asc"
         }
         resp = requests.get(f"{API_ENDPOINT}/chapter", params=params)
-        if resp.status_code != 200:
-            print(f"Error fetching chapters: {resp.status_code}")
+        if resp.status_code == 429:
+            console.print("[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]")
+            time.sleep(5)
+            continue
+        elif resp.status_code != 200:
+            console.print(f"[red]Error fetching chapters: {resp.status_code}[/]")
             break
         data = resp.json()
         batch = data.get("data", [])
@@ -309,35 +330,43 @@ def fetch_all_chapters_md(manga_uuid: str, lang="en"):
         offset += limit
     return chapters
 
-def get_images_md(chapter_id: str, use_saver=False):
-    resp = requests.get(f"https://api.mangadex.org/at-home/server/{chapter_id}")
-    if resp.status_code != 200:
-        print(f"Error fetching chapter {chapter_id}: {resp.status_code}")
-        return []
+def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
+    for attempt in range(max_retries):
+        rate_limiter_athome.acquire("mangadex_athome")
+        resp = requests.get(f"https://api.mangadex.org/at-home/server/{chapter_id}")
+        if resp.status_code == 429:
+            wait = (attempt + 1) * 5
+            console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
+            time.sleep(wait)
+            continue
+        elif resp.status_code != 200:
+            console.print(f"[red]Error fetching chapter {chapter_id}: {resp.status_code}[/]")
+            return []
+        chapter_data = resp.json().get("chapter", {})
+        base_url = resp.json().get("baseUrl")
+        hash_code = chapter_data.get("hash")
+        pages = chapter_data.get("dataSaver" if use_saver else "data", [])
+        if not base_url or not hash_code or not pages:
+            return []
+        return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
+    return []
 
-    chapter_data = resp.json().get("chapter", {})
-    base_url = resp.json().get("baseUrl")
-    hash_code = chapter_data.get("hash")
-    pages = chapter_data.get("dataSaver" if use_saver else "data", [])
-
-    if not base_url or not hash_code or not pages:
-        print(f"No pages found for chapter {chapter_id}")
-        return []
-
-    urls = [f"{base_url}/data/{hash_code}/{page}" for page in pages]
-    return urls
-def download_md_chapters(manga_url, lang="en"):
+# ------------------ MANGADEX FUNCTIONS ------------------
+def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True):
+    # Extract UUID and clean manga title
     manga_uuid = extract_manga_uuid(manga_url)
-    manga_name = extract_manga_name_from_url(manga_url)
     if not manga_uuid:
         console.print(f"[red]Could not extract manga UUID from URL[/]")
         return
 
-    # Root folder
-    manga_root_folder = sanitize_folder_name(manga_name)
+    manga_name_clean = get_manga_name_from_md(manga_url, lang=lang)
+    manga_name_clean = sanitize_folder_name(manga_name_clean)
+
+    # Root folder named after manga
+    manga_root_folder = manga_name_clean
     os.makedirs(manga_root_folder, exist_ok=True)
 
-    console.print(f"[cyan]Downloading '{manga_name}' in language '{lang}'[/]")
+    console.print(f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]")
     chapters = fetch_all_chapters_md(manga_uuid, lang)
     console.print(f"[green]Found {len(chapters)} chapters[/]")
 
@@ -347,16 +376,42 @@ def download_md_chapters(manga_url, lang="en"):
         chapter_title = attr.get("title", "")
         chap_id = chapter.get("id")
 
+        # Subfolder per chapter
         chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
         chapter_folder_name = sanitize_folder_name(chapter_folder_name)
         chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
+
+        images = get_images_md(chap_id, use_saver=use_saver)
+        if not images:
+            console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
+            continue
+
         os.makedirs(chapter_folder, exist_ok=True)
-
         console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
-        images = get_images_md(chap_id)
-        urls_to_download = [(url, chapter_folder) for url in images]
-        download_all_pages(urls_to_download, max_workers=10, manga_name=manga_name)
 
+        urls_to_download = [(url, chapter_folder) for url in images]
+        download_all_pages(urls_to_download, max_workers=10, manga_name=manga_name_clean)
+
+        if not os.listdir(chapter_folder):
+            console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
+            os.rmdir(chapter_folder)
+
+    # ✅ Create CBZ from the manga root folder
+    if create_cbz:
+        create_cbz_for_all(manga_root_folder)
+
+
+def get_manga_name_from_md(manga_url, lang="en"):
+    manga_uuid = extract_manga_uuid(manga_url)
+    if not manga_uuid:
+        return extract_manga_name_from_url(manga_url)
+    resp = requests.get(f"{API_ENDPOINT}/manga/{manga_uuid}")
+    if resp.status_code != 200:
+        return extract_manga_name_from_url(manga_url)
+    data = resp.json().get("data", {})
+    attributes = data.get("attributes", {})
+    title_dict = attributes.get("title", {})
+    return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
 
 # ------------------ CLI ------------------
 def parse_args():
@@ -376,7 +431,6 @@ def main():
     config = load_config()
     args = parse_args()
 
-
     manga_name = args.manga or config.get("manga_name")
     start_chapter = args.start_chapter or config.get("start_chapter", 1)
     start_page = args.start_page or config.get("start_page", 1)
@@ -386,14 +440,21 @@ def main():
     md_lang = args.md_lang or config.get("md_language", "en")
 
     validate_manga_input(manga_name)
-    manga_name_clean = extract_manga_name_from_url(manga_name)
 
-    console.print(f"[magenta]Starting download for: {manga_name_clean}[/]")
-
-    # If MangaDex URL, use MD downloader
+    # Determine clean manga name
     if manga_name.startswith("http") and "mangadex" in manga_name.lower():
-        download_md_chapters(manga_name, lang=md_lang)
+        download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
+        manga_name_clean = get_manga_name_from_md(manga_name, lang=md_lang)
+        manga_name_clean = sanitize_folder_name(manga_name_clean)
+        download_md_chapters(
+            manga_url=manga_name,
+            lang=md_lang,
+            create_cbz=cbz_flag,
+            manga_name_clean=manga_name_clean
+        )
     else:
+        manga_name_clean = extract_manga_name_from_url(manga_name)
+        manga_name_clean = sanitize_folder_name(manga_name_clean)
         urls_to_download = gather_all_urls(
             manga_name_clean,
             start_chapter=start_chapter,
@@ -402,13 +463,9 @@ def main():
             max_decimals=50,
             workers=workers
         )
-        console.print(f"[cyan]Total pages to download: {len(urls_to_download)}[/]")
         download_all_pages(urls_to_download, max_workers=workers, manga_name=manga_name_clean)
-
-    if cbz_flag and not stop_signal:
-        create_cbz_for_all(manga_name_clean)
-    else:
-        console.print("[cyan]Skipping CBZ archive creation.[/]")
-
+        if cbz_flag and not stop_signal:
+            create_cbz_for_all(manga_name_clean)
+            
 if __name__ == "__main__":
     main()
