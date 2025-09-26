@@ -53,3 +53,23 @@ Uses a manga api by FireFlyDeveloper
 
    ```bash
    git clone https://github.com/FireFlyDeveloper/Manga-API.git
+   ```
+
+2. Install packages
+
+   *Mac/Linux*
+
+   ```bash
+   git clone https://github.com/nycthera/mdl.git
+   cd mdl
+   chmod +x install.sh
+   ./install.sh
+   ```
+
+   *Windows*
+
+   ```bash
+   git clone https://github.com/nycthera/mdl.git
+   cd mdl
+   install.bat
+   ```
