@@ -48,7 +48,7 @@ if exist package.json (
 cd ..
 
 echo.
-echo ✅ Installation complete.
+echo Installation complete.
 echo To activate Python venv: call venv\Scripts\activate
 echo To start Node server: cd Manga-API && npm start
 pause

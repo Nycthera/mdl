@@ -16,6 +16,7 @@ from rich.progress import Progress, BarColumn, TextColumn
 import threading
 import re
 from collections import defaultdict
+import pathlib
 
 # ------------------ CONFIG PATH ------------------
 def get_config_path():
@@ -153,13 +154,13 @@ def download_image(url, folder, max_retries=5, backoff_factor=1.0):
             return f"{Colors.RED}Unexpected error for {filename}: {e}{Colors.RESET}"
 
 # ------------------ CBZ ------------------
-def create_cbz_for_all(folder_path, delete_folder=True):
+def create_cbz_for_all(folder_path):
     folder_path = sanitize_folder_name(folder_path)
-    cbz_name = f"{folder_path}.cbz"
+    cbz_name = os.path.join(folder_path, f"{folder_path}.cbz")
     console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
 
     with zipfile.ZipFile(cbz_name, 'w') as cbz:
-        for root, _, files in os.walk(folder_path):
+        for root, dirs, files in os.walk(folder_path):
             files = sorted(files)
             for file in files:
                 file_path = os.path.join(root, file)
@@ -170,12 +171,16 @@ def create_cbz_for_all(folder_path, delete_folder=True):
 
     console.print(f"[magenta]Created {cbz_name}[/]")
 
-    if delete_folder:
-        try:
-            shutil.rmtree(folder_path)
-            console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
-        except Exception as e:
-            console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
+    # Delete only subfolders (per chapter folders)
+    for item in os.listdir(folder_path):
+        item_path = os.path.join(folder_path, item)
+        if os.path.isdir(item_path):
+            try:
+                shutil.rmtree(item_path)
+                console.print(f"[green]Deleted folder {item_path}[/]")
+            except Exception as e:
+                console.print(f"[red]Failed to delete {item_path}: {e}[/]")
+
 
 # ----------- sanitize manga name -----------
 def sanitize_folder_name(name: str) -> str:
@@ -413,6 +418,26 @@ def get_manga_name_from_md(manga_url, lang="en"):
     title_dict = attributes.get("title", {})
     return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
 
+# ----- Folder you are gone ---------------
+def safe_delete_folder(folder_path):
+    try:
+        folder = pathlib.Path(folder_path)
+        for item in folder.rglob("*"):
+            try:
+                if item.is_file() or item.is_symlink():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            except Exception as e:
+                console.print(f"[yellow]Warning: could not delete {item}: {e}[/]")
+        # Try removing the root folder at the end
+        if folder.exists():
+            folder.rmdir()
+        console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
+    except Exception as e:
+        console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
+        
+
 # ------------------ CLI ------------------
 def parse_args():
     import argparse
@@ -446,12 +471,6 @@ def main():
         download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
         manga_name_clean = get_manga_name_from_md(manga_name, lang=md_lang)
         manga_name_clean = sanitize_folder_name(manga_name_clean)
-        download_md_chapters(
-            manga_url=manga_name,
-            lang=md_lang,
-            create_cbz=cbz_flag,
-            manga_name_clean=manga_name_clean
-        )
     else:
         manga_name_clean = extract_manga_name_from_url(manga_name)
         manga_name_clean = sanitize_folder_name(manga_name_clean)
