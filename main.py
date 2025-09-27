@@ -468,7 +468,7 @@ def main():
             create_cbz_for_all(manga_name_clean)
             
 if __name__ == "__main__":
-    print("""
+    print(r"""
           
  _ __ ___   __ _ _ __   __ _  __ _                       
 | '_ ` _ \ / _` | '_ \ / _` |/ _` |                      
