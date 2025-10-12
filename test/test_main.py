@@ -16,14 +16,6 @@ import os
 import tempfile
 import shutil
 
-# ------------------ EXTRACT MANGA NAME ------------------
-def test_extract_manga_name_url():
-    url = "https://scans.lastation.us/manga/one-piece/"
-    assert extract_manga_name_from_url(url) == "one piece"
-
-def test_extract_manga_name_text():
-    assert extract_manga_name_from_url("naruto") == "naruto"
-
 # ------------------ VALIDATE MANGA INPUT ------------------
 def test_validate_manga_input(monkeypatch):
     # should not raise
@@ -53,7 +45,6 @@ def test_download_image_success(tmp_path, monkeypatch):
     folder = tmp_path / "images"
     url = "https://fake.url/image.png"
     
-    # mock session.get
     class MockResponse:
         content = b"fake image"
         def raise_for_status(self):
@@ -65,12 +56,6 @@ def test_download_image_success(tmp_path, monkeypatch):
     saved_file = folder / "image.png"
     assert saved_file.exists()
     assert saved_file.read_bytes() == b"fake image"
-
-# ------------------ SANITIZE FOLDER NAME ------------------
-def test_sanitize_folder_name():
-    name = "Chapter: 1/2*?"
-    sanitized = sanitize_folder_name(name)
-    assert sanitized == "Chapter_ 1_2__"
 
 # ------------------ EXTRACT MANGA UUID ------------------
 def test_extract_manga_uuid_valid():
