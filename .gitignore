@@ -30,3 +30,6 @@ venv/
 build/
 dist/
 main.spec
+
+#Custom files
+test.py

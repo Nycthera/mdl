@@ -19,7 +19,7 @@ import shutil
 # ------------------ EXTRACT MANGA NAME ------------------
 def test_extract_manga_name_url():
     url = "https://scans.lastation.us/manga/one-piece/"
-    assert extract_manga_name_from_url(url) == "one-piece"
+    assert extract_manga_name_from_url(url) == "one piece"
 
 def test_extract_manga_name_text():
     assert extract_manga_name_from_url("naruto") == "naruto"

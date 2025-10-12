@@ -1,31 +1,36 @@
-import requests, json
+import requests
+import os
 
-def test_api_response():
-    url = "http://localhost:3000/api/search?query=onimai-i-m-now-your-sister"
-    response = requests.get(url)
-    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+def download_image(url, save_folder="downloads"):
+    try:
+        os.makedirs(save_folder, exist_ok=True)
+        filename = url.split("/")[-1]
+        save_path = os.path.join(save_folder, filename)
 
-    data = response.json()
-    print("Full response:\n", json.dumps(data, indent=2))  # Debug print
+        if os.path.exists(save_path):
+            print(f"File '{filename}' already exists. Skipping download.")
+            return
 
-    # Extract results
-    if isinstance(data, dict):
-        releases = data.get("results") or data.get("data") or []
-    elif isinstance(data, list):
-        releases = data
-    else:
-        raise AssertionError(f"Unexpected response structure: {type(data)}")
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) "
+                          "Chrome/141.0.0.0 Safari/537.36"
+        }
 
-    assert len(releases) > 0, "No results found for your query"
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()  # Raise exception for HTTP errors
 
-    # Print first result safely
-    first = releases[0]
-    print("First release object:\n", json.dumps(first, indent=2))
+        with open(save_path, "wb") as f:
+            f.write(response.content)
 
-    # Example: check expected keys
-    for key in ["id", "title", "image"]:
-        if key not in first:
-            print(f"Warning: '{key}' not in first release")
+        print(f"Image downloaded successfully: {save_path}")
 
-if __name__ == "__main__":
-    test_api_response()
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP error occurred: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading image: {e}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+
+# Example usage
+download_image("https://img-r1.2xstorage.com/bleach-colored/1/0.webp")

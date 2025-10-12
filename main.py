@@ -93,10 +93,14 @@ def extract_manga_name_from_url(manga_input):
         path = urlparse(manga_input).path
         parts = [p for p in path.split("/") if p]
         if len(parts) >= 2:
-            return parts[1]
+            name = parts[1]
+            # Replace hyphens commonly used in URLs with spaces for nicer folder names
+            return name.replace("-", " ")
         else:
-            return parts[-1]
+            name = parts[-1]
+            return name.replace("-", " ")
     return manga_input
+
 
 def url_exists(url):
     try:
@@ -155,25 +159,34 @@ def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 
 # ------------------ CBZ ------------------
 def create_cbz_for_all(folder_path):
-    folder_path = sanitize_folder_name(folder_path)
-    cbz_name = os.path.join(folder_path, f"{folder_path}.cbz")
+    # Use sanitized base name for the CBZ (preserve spaces, remove illegal chars)
+    base_folder = os.path.abspath(folder_path)
+    base_name = os.path.basename(base_folder)
+    safe_base_name = sanitize_folder_name(base_name)
+    # Place the CBZ inside the manga root folder so the finished archive is located
+    # within the manga folder itself (e.g., <Manga Folder>/<Manga Folder>.cbz)
+    cbz_name = os.path.join(base_folder, f"{safe_base_name}.cbz")
     console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
 
     with zipfile.ZipFile(cbz_name, 'w') as cbz:
-        for root, dirs, files in os.walk(folder_path):
+        for root, dirs, files in os.walk(base_folder):
             files = sorted(files)
             for file in files:
                 file_path = os.path.join(root, file)
-                if file_path == cbz_name:
+                # avoid adding the cbz itself if it's inside the folder
+                if os.path.abspath(file_path) == os.path.abspath(cbz_name):
                     continue
-                arcname = os.path.relpath(file_path, folder_path)
+                arcname = os.path.relpath(file_path, base_folder)
                 cbz.write(file_path, arcname=arcname)
 
     console.print(f"[magenta]Created {cbz_name}[/]")
 
-    # Delete only subfolders (per chapter folders)
-    for item in os.listdir(folder_path):
-        item_path = os.path.join(folder_path, item)
+    # Delete only subfolders (per chapter folders) inside the manga root folder
+    for item in os.listdir(base_folder):
+        item_path = os.path.join(base_folder, item)
+        # don't remove the generated cbz file
+        if item.lower().endswith('.cbz'):
+            continue
         if os.path.isdir(item_path):
             try:
                 shutil.rmtree(item_path)
@@ -185,7 +198,37 @@ def create_cbz_for_all(folder_path):
 # ----------- sanitize manga name -----------
 def sanitize_folder_name(name: str) -> str:
     """Remove illegal characters from folder/file names."""
-    return re.sub(r'[<>:"/\\|?*]', "_", name)
+    # Replace illegal filesystem characters with underscore, but keep spaces
+    cleaned = re.sub(r'[<>:"/\\|?*]', "", name)
+    # Replace underscores/hyphens that were used as separators in some inputs with spaces
+    cleaned = cleaned.replace("_", " ")
+    cleaned = cleaned.replace("-", " ")
+    # Collapse multiple spaces into one and trim
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned
+
+
+def get_slug_and_pretty(manga_input: str):
+    """Return (slug_for_urls, pretty_folder_name).
+
+    - slug_for_urls: hyphen-separated string suitable for building URLs
+    - pretty_folder_name: sanitized name with spaces for folders/CBZ
+    """
+    if manga_input.startswith("http"):
+        path = urlparse(manga_input).path
+        parts = [p for p in path.split("/") if p]
+        if len(parts) >= 2:
+            slug = parts[1]
+        else:
+            slug = parts[-1]
+    else:
+        slug = manga_input
+
+    # Normalize slug: replace whitespace with single hyphen and collapse multiples
+    slug = re.sub(r"\s+", "-", slug).strip("-")
+    # Create a pretty folder name (spaces instead of hyphens)
+    pretty = sanitize_folder_name(slug.replace("-", " "))
+    return slug, pretty
 
 # ------------------ URL GATHERING WITH PROGRESS ------------------
 def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max_decimals=5, workers=10):
@@ -472,19 +515,19 @@ def main():
         manga_name_clean = get_manga_name_from_md(manga_name, lang=md_lang)
         manga_name_clean = sanitize_folder_name(manga_name_clean)
     else:
-        manga_name_clean = extract_manga_name_from_url(manga_name)
-        manga_name_clean = sanitize_folder_name(manga_name_clean)
+        # Separate slug (for URLs) from pretty folder name (for filesystem)
+        slug, pretty_name = get_slug_and_pretty(manga_name)
         urls_to_download = gather_all_urls(
-            manga_name_clean,
+            slug,
             start_chapter=start_chapter,
             start_page=start_page,
             max_pages=max_pages,
             max_decimals=50,
             workers=workers
         )
-        download_all_pages(urls_to_download, max_workers=workers, manga_name=manga_name_clean)
+        download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
         if cbz_flag and not stop_signal:
-            create_cbz_for_all(manga_name_clean)
+            create_cbz_for_all(pretty_name)
             
 if __name__ == "__main__":
     print("""
@@ -505,4 +548,4 @@ if __name__ == "__main__":
 """)
 
 
-    main()
+main()
