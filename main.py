@@ -17,6 +17,19 @@ import threading
 import re
 from collections import defaultdict
 import pathlib
+from playwright_stealth import Stealth
+from playwright.async_api import async_playwright
+import asyncio
+from urllib.parse import urljoin
+from rich.panel import Panel
+from rich.table import Table
+from rich.align import Align
+
+
+# ------------ CONSTANTS ------------
+
+pattern = re.compile(r"/manga/[^/]+/\d{4}-\d{3,4}\.png$", re.IGNORECASE)
+title_pattern = re.compile(r"/manga/([^/]+)/")  # extract title part
 
 # ------------------ CONFIG PATH ------------------
 def get_config_path():
@@ -59,7 +72,12 @@ BASE_URLS = [
 
 API_ENDPOINT = "https://api.mangadex.org"
 session = requests.Session()
-session.headers.update({"User-Agent": "Mozilla/5.0"})
+session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/122.0.0.0 Safari/537.36"
+})
+
 
 # ------------------ CONFIG ------------------
 def create_default_config():
@@ -161,13 +179,33 @@ def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 def create_cbz_for_all(folder_path):
     # Use sanitized base name for the CBZ (preserve spaces, remove illegal chars)
     base_folder = os.path.abspath(folder_path)
+
+    # --- Defensive checks: folder must exist and have files to archive ---
+    if not os.path.isdir(base_folder):
+        console.print(f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]")
+        return
+
+    # ensure there's at least one file (excluding existing .cbz) to archive
+    has_files = False
+    for root, dirs, files in os.walk(base_folder):
+        for f in files:
+            if not f.lower().endswith('.cbz'):
+                has_files = True
+                break
+        if has_files:
+            break
+
+    if not has_files:
+        console.print(f"[red]No files found in {base_folder}; skipping CBZ creation.[/]")
+        return
+
     base_name = os.path.basename(base_folder)
     safe_base_name = sanitize_folder_name(base_name)
-    # Place the CBZ inside the manga root folder so the finished archive is located
-    # within the manga folder itself (e.g., <Manga Folder>/<Manga Folder>.cbz)
+    # Place the CBZ inside the manga root folder
     cbz_name = os.path.join(base_folder, f"{safe_base_name}.cbz")
     console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
 
+    # Now safe to create the CBZ (parent dir exists)
     with zipfile.ZipFile(cbz_name, 'w') as cbz:
         for root, dirs, files in os.walk(base_folder):
             files = sorted(files)
@@ -444,7 +482,7 @@ def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True)
             console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
             os.rmdir(chapter_folder)
 
-    # ✅ Create CBZ from the manga root folder
+    # Create CBZ from the manga root folder
     if create_cbz:
         create_cbz_for_all(manga_root_folder)
 
@@ -461,7 +499,74 @@ def get_manga_name_from_md(manga_url, lang="en"):
     title_dict = attributes.get("title", {})
     return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
 
-# ----- Folder you are gone ---------------
+# Literal method to get from the manga link, instead of image URL
+async def check_url_weebcentral(url):
+    console.print(Panel.fit(
+        f"[bold magenta]WeebCentral ✨[/bold magenta]\n[yellow]{url}[/]",
+        title="[white on magenta] Weeb Mode [/]",
+        border_style="magenta"
+    ))
+
+    async with Stealth().use_async(async_playwright()) as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+
+        console.print("[cyan] Loading page... please wait...[/]")
+        try:
+            response = await page.goto(url, wait_until="load", timeout=45000)
+            if not response or response.status != 200:
+                console.print(f"[red] Failed to load page (status {response.status if response else 0})[/]")
+                return [], "Unknown_Title"
+        except Exception as e:
+            console.print(f"[red] Page load warning: {e}[/]")
+            return [], "Unknown_Title"
+
+        console.print("[yellow] Scrolling for lazy-loaded images...[/]")
+        for _ in range(20):
+            await page.mouse.wheel(0, 1200)
+            await asyncio.sleep(0.7)
+
+        await asyncio.sleep(4)
+
+        img_elements = await page.query_selector_all("img")
+        img_urls = []
+        for img in img_elements:
+            src = await img.get_attribute("src")
+            if src and "/manga/" in src and src.endswith(".png"):
+                img_urls.append(urljoin(url, src))
+
+        title_pattern = re.compile(r"/manga/([^/]+)/", re.IGNORECASE)
+        title = "Unknown_Title"
+        for u in img_urls:
+            match = title_pattern.search(u)
+            if match:
+                title = match.group(1)
+                break
+
+        browser.close()
+
+        # --- Fancy summary table ---
+        table = Table(title=f"[bold magenta]WeebCentral Extraction Summary[/bold magenta]")
+        table.add_column("Field", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white")
+
+        table.add_row("Title", f"[bold white]{title}[/]")
+        table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
+        table.add_row("Status", "[bold green]Success[/]" if img_urls else "[bold red]No images found[/]")
+
+        console.print()
+        console.print(Panel(Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"))
+
+        return img_urls, title
+
+
+# --------- Generate download url for weebcentral images ----------
+
+def generate_weebcentral_image_urls(manga_name, chapter, max_pages=50):
+    generated_url = f"https://weebcentral.com/manga/{manga_name}/{chapter:04d}-000.png"
+    return generated_url
+
+
 def safe_delete_folder(folder_path):
     try:
         folder = pathlib.Path(folder_path)
@@ -514,6 +619,37 @@ def main():
         download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
         manga_name_clean = get_manga_name_from_md(manga_name, lang=md_lang)
         manga_name_clean = sanitize_folder_name(manga_name_clean)
+    elif manga_name.startswith("https") and "weebcentral" in manga_name.lower():
+        img_urls, title = asyncio.run(check_url_weebcentral(manga_name))
+        slug, pretty_name = get_slug_and_pretty(title)  # ← ADD THIS LINE
+        generate_weebcentral_image_urls(title, start_chapter)
+        urls_to_download = gather_all_urls(
+            title,
+            start_chapter=start_chapter,
+            start_page=start_page,
+            max_pages=max_pages,
+            max_decimals=50,
+            workers=workers
+        )
+    download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+
+    if cbz_flag and not stop_signal:
+        if os.path.isdir(pretty_name) and any(
+            f for f in os.listdir(pretty_name) if not f.lower().endswith('.cbz')
+        ):
+            create_cbz_for_all(pretty_name)
+        else:
+            console.print(f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]")
+
+
+        if cbz_flag and not stop_signal:
+    # only create CBZ if folder exists and has files
+            if os.path.isdir(pretty_name) and any(
+                (f for f in os.listdir(pretty_name) if not f.lower().endswith('.cbz'))
+            ):
+                create_cbz_for_all(pretty_name)
+            else:
+                console.print(f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]")
     else:
         # Separate slug (for URLs) from pretty folder name (for filesystem)
         slug, pretty_name = get_slug_and_pretty(manga_name)
@@ -529,6 +665,8 @@ def main():
         if cbz_flag and not stop_signal:
             create_cbz_for_all(pretty_name)
             
+    
+    
 if __name__ == "__main__":
     print("""
 \033[96m          
@@ -537,15 +675,70 @@ if __name__ == "__main__":
 | | | | | | (_| | | | | (_| | (_| |                      
 |_| |_| |_|\\__,_|_| |_|\\__, |\\__,_|                      
      _                 |___/                 _           
-  __| | _____      ___ __ | | ___   __ _  __| | ___ _ __ 
- / _` |/ _ \\ \\ /\\ / / '_ \\| |/ _ \\ / _` |/ _` |/ _ \\ '__|
-| (_| | (_) \\ V  V /| | | | | (_) | (_| | (_| |  __/ |   
- \\__,_|\\___/ \\_/\\_/ |_| |_|_|\\___/ \\__,_|\\__,_|\\___|_|   
-\033[95m
-
-- nycthera, 2025
+  __| | _____      ___ __ | | ___   __ _  __| |
+ / _` |/ _ \\ \\ /\\ / / '_ \\| |/ _ \\ / _` |/ _` |
+| (_| |  __/\\ V  V /| | | | | (_) | (_| | (_| |
+ \\__,_|\\___| \\_/\\_/ |_| |_|_|\\___/ \\__,_|\\__,_|
 \033[0m
 """)
 
+    config = load_config()
+    args = parse_args()
 
-    main()
+    manga_name = args.manga or config.get("manga_name")
+    start_chapter = args.start_chapter or config.get("start_chapter", 1)
+    start_page = args.start_page or config.get("start_page", 1)
+    max_pages = args.max_pages or config.get("max_pages", 50)
+    workers = args.workers or config.get("workers", 10)
+    cbz_flag = args.cbz or config.get("cbz", True)
+    md_lang = args.md_lang or config.get("md_language", "en")
+
+    validate_manga_input(manga_name)
+
+    # ---- MangaDex case ----
+    if "mangadex" in manga_name.lower():
+        download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
+
+    # ---- WeebCentral case ----
+    elif manga_name.startswith("https") and "weebcentral" in manga_name.lower():
+        console.print(Panel.fit("[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"))
+        img_urls, title = asyncio.run(check_url_weebcentral(manga_name))
+
+    if not img_urls:
+        console.print("[red]No images detected, exiting WeebCentral mode.[/]")
+        sys.exit(1)
+
+    slug, pretty_name = get_slug_and_pretty(title)
+    folder = sanitize_folder_name(pretty_name)
+    os.makedirs(folder, exist_ok=True)
+
+    console.print(f"[yellow]📥 Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]")
+    urls_to_download = [(u, folder) for u in img_urls]
+
+    download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+
+    if cbz_flag and not stop_signal:
+        create_cbz_for_all(pretty_name)
+
+
+    # ---- Regular direct image source case ----
+    else:
+        slug, pretty_name = get_slug_and_pretty(manga_name)
+        urls_to_download = gather_all_urls(
+            slug,
+            start_chapter=start_chapter,
+            start_page=start_page,
+            max_pages=max_pages,
+            max_decimals=50,
+            workers=workers
+        )
+        download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+
+    # ---- CBZ packaging ----
+    if cbz_flag and not stop_signal:
+        if os.path.isdir(pretty_name) and any(
+            f for f in os.listdir(pretty_name) if not f.lower().endswith('.cbz')
+        ):
+            create_cbz_for_all(pretty_name)
+        else:
+            console.print(f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]")

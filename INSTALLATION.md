@@ -102,6 +102,12 @@ The application creates a config file at `~/.config/manga_downloader/config.json
 }
 ```
 
+### Playwright install
+
+```bash
+playwright install
+```
+
 ## Development
 
 ### Running Tests

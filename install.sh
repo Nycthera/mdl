@@ -33,6 +33,8 @@ fi
 pip install --upgrade pip
 pip install -r requirements.txt
 
+# Install Playwright browsers
+playwright install
 # -------- Node.js setup --------
 echo "Setting up Manga-API (Node.js)..."
 cd "$base_path/Manga-API" || exit

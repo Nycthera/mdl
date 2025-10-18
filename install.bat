@@ -38,6 +38,9 @@ REM Install Python deps
 pip install --upgrade pip
 pip install -r requirements.txt
 
+REM Install Playwright
+playwright install
+
 REM Setup Manga-API
 cd Manga-API
 if exist package.json (
