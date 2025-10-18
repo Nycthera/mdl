@@ -1,4 +1,4 @@
 requests
 rich
 playwright
-playwright-stealth
+playwright-stealth @ git+https://github.com/AtuboDad/playwright-stealth
