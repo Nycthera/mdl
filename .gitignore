@@ -33,3 +33,5 @@ main.spec
 
 #Custom files
 test.py
+
+.ruff_cache/

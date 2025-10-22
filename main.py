@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+# todo: fix bug on line 707 and add fixes for aiohttp chunked encoding error
 import os
 import sys
 import json
@@ -24,12 +24,19 @@ from urllib.parse import urljoin
 from rich.panel import Panel
 from rich.table import Table
 from rich.align import Align
+import aiohttp
 
 
 # ------------ CONSTANTS ------------
 
 pattern = re.compile(r"/manga/[^/]+/\d{4}-\d{3,4}\.png$", re.IGNORECASE)
 title_pattern = re.compile(r"/manga/([^/]+)/")  # extract title part
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/122.0.0.0 Safari/537.36"
+)
+
 
 # ------------------ CONFIG PATH ------------------
 def get_config_path():
@@ -37,9 +44,11 @@ def get_config_path():
     os.makedirs(config_dir, exist_ok=True)
     return os.path.join(config_dir, "config.json")
 
+
 CONFIG_FILE = get_config_path()
 stop_signal = False
 console = Console()
+
 
 # ------------------ SIGNAL HANDLER ------------------
 def signal_handler(sig, frame):
@@ -47,7 +56,9 @@ def signal_handler(sig, frame):
     stop_signal = True
     console.print("\n[red]Received interrupt. Stopping gracefully...[/]")
 
+
 signal.signal(signal.SIGINT, signal_handler)
+
 
 # ------------------ COLORS (legacy) ------------------
 class Colors:
@@ -59,24 +70,28 @@ class Colors:
     MAGENTA = "\033[35m"
     BOLD = "\033[1m"
 
+
 def cprint(msg, color=Colors.RESET):
     print(color + msg + Colors.RESET)
+
 
 # ------------------ BASE URLS ------------------
 BASE_URLS = [
     "https://scans.lastation.us/manga/",
     "https://official.lowee.us/manga/",
     "https://hot.planeptune.us/manga/",
-    "https://scans-hot.planeptune.us/manga"
+    "https://scans-hot.planeptune.us/manga",
 ]
 
 API_ENDPOINT = "https://api.mangadex.org"
 session = requests.Session()
-session.headers.update({
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                  "Chrome/122.0.0.0 Safari/537.36"
-})
+session.headers.update(
+    {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/122.0.0.0 Safari/537.36"
+    }
+)
 
 
 # ------------------ CONFIG ------------------
@@ -88,11 +103,12 @@ def create_default_config():
         "max_pages": 50,
         "workers": 10,
         "cbz": True,
-        "md_language": "en"
+        "md_language": "en",
     }
     with open(CONFIG_FILE, "w") as f:
         json.dump(default_config, f, indent=4)
     cprint(f"Default config created: {CONFIG_FILE}", Colors.GREEN)
+
 
 def load_config():
     if not os.path.exists(CONFIG_FILE):
@@ -100,11 +116,16 @@ def load_config():
     with open(CONFIG_FILE, "r") as f:
         return json.load(f)
 
+
 # ------------------ HELPERS ------------------
 def validate_manga_input(manga_name):
     if not manga_name:
-        cprint("Error: No manga name or URL specified. Use -M/--manga or set a default in config.", Colors.RED)
+        cprint(
+            "Error: No manga name or URL specified. Use -M/--manga or set a default in config.",
+            Colors.RED,
+        )
         sys.exit(1)
+
 
 def extract_manga_name_from_url(manga_input):
     if manga_input.startswith("http"):
@@ -120,11 +141,19 @@ def extract_manga_name_from_url(manga_input):
     return manga_input
 
 
-def url_exists(url):
+async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
+    """
+    Check if a URL exists using an async HEAD request.
+    Returns True if status == 200, False otherwise.
+    """
     try:
-        r = session.head(url, allow_redirects=True, timeout=5)
-        return r.status_code == 200
-    except:
+        async with session.head(url, allow_redirects=True, timeout=5) as resp:
+            return resp.status == 200
+    except aiohttp.ClientError:
+        # Network-related exceptions: connection errors, timeouts, etc.
+        return False
+    except asyncio.TimeoutError:
+        # Timeout specifically
         return False
 
 # ------------------ RATE LIMITER ------------------
@@ -146,8 +175,10 @@ class RateLimiter:
                 time.sleep(max(sleep_for, 0))
             self.calls[key].append(time.time())
 
+
 rate_limiter = RateLimiter(max_calls=5, per_seconds=1)
 rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
+
 
 # ------------------ DOWNLOAD ------------------
 def download_image(url, folder, max_retries=5, backoff_factor=1.0):
@@ -175,6 +206,7 @@ def download_image(url, folder, max_retries=5, backoff_factor=1.0):
         except Exception as e:
             return f"{Colors.RED}Unexpected error for {filename}: {e}{Colors.RESET}"
 
+
 # ------------------ CBZ ------------------
 def create_cbz_for_all(folder_path):
     # Use sanitized base name for the CBZ (preserve spaces, remove illegal chars)
@@ -182,21 +214,25 @@ def create_cbz_for_all(folder_path):
 
     # --- Defensive checks: folder must exist and have files to archive ---
     if not os.path.isdir(base_folder):
-        console.print(f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]")
+        console.print(
+            f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]"
+        )
         return
 
     # ensure there's at least one file (excluding existing .cbz) to archive
     has_files = False
     for root, dirs, files in os.walk(base_folder):
         for f in files:
-            if not f.lower().endswith('.cbz'):
+            if not f.lower().endswith(".cbz"):
                 has_files = True
                 break
         if has_files:
             break
 
     if not has_files:
-        console.print(f"[red]No files found in {base_folder}; skipping CBZ creation.[/]")
+        console.print(
+            f"[red]No files found in {base_folder}; skipping CBZ creation.[/]"
+        )
         return
 
     base_name = os.path.basename(base_folder)
@@ -206,7 +242,7 @@ def create_cbz_for_all(folder_path):
     console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
 
     # Now safe to create the CBZ (parent dir exists)
-    with zipfile.ZipFile(cbz_name, 'w') as cbz:
+    with zipfile.ZipFile(cbz_name, "w") as cbz:
         for root, dirs, files in os.walk(base_folder):
             files = sorted(files)
             for file in files:
@@ -223,7 +259,7 @@ def create_cbz_for_all(folder_path):
     for item in os.listdir(base_folder):
         item_path = os.path.join(base_folder, item)
         # don't remove the generated cbz file
-        if item.lower().endswith('.cbz'):
+        if item.lower().endswith(".cbz"):
             continue
         if os.path.isdir(item_path):
             try:
@@ -242,7 +278,7 @@ def sanitize_folder_name(name: str) -> str:
     cleaned = cleaned.replace("_", " ")
     cleaned = cleaned.replace("-", " ")
     # Collapse multiple spaces into one and trim
-    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
 
@@ -268,8 +304,11 @@ def get_slug_and_pretty(manga_input: str):
     pretty = sanitize_folder_name(slug.replace("-", " "))
     return slug, pretty
 
+
 # ------------------ URL GATHERING WITH PROGRESS ------------------
-def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max_decimals=5, workers=10):
+def gather_all_urls(
+    manga_name, start_chapter=1, start_page=1, max_pages=50, max_decimals=5, workers=10
+):
     urls_to_download = []
     folder_base = sanitize_folder_name(manga_name)
     console.print(f"[yellow]Gathering pages for {manga_name}...[/]")
@@ -279,19 +318,26 @@ def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max
         if stop_signal:
             break
         chapter_str = f"{chapter:04d}"
-        found_any = any(url_exists(f"{base}{manga_name}/{chapter_str}-001.png") for base in BASE_URLS)
+        found_any = any(
+            url_exists(f"{base}{manga_name}/{chapter_str}-001.png")
+            for base in BASE_URLS
+        )
 
         if found_any:
             chapter_folder = os.path.join(folder_base, f"chapter_{chapter_str}")
             os.makedirs(chapter_folder, exist_ok=True)
-            urls = [f"{base}{manga_name}/{chapter_str}-{page:03d}.png" for base in BASE_URLS for page in range(1, max_pages + 1)]
+            urls = [
+                f"{base}{manga_name}/{chapter_str}-{page:03d}.png"
+                for base in BASE_URLS
+                for page in range(1, max_pages + 1)
+            ]
             pages_found = 0
 
             with Progress(
                 TextColumn(f"[bold yellow]Checking Chapter {chapter_str}[/]"),
                 BarColumn(),
                 "[progress.percentage]{task.percentage:>3.1f}%",
-                console=console
+                console=console,
             ) as progress:
                 task = progress.add_task("Checking", total=len(urls))
                 with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -307,19 +353,29 @@ def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max
             decimal_found_any = False
             for dec in range(1, max_decimals + 1):
                 chapter_decimal_str = f"{chapter_str}.{dec}"
-                first_page_url = f"{BASE_URLS[0]}{manga_name}/{chapter_decimal_str}-001.png"
+                first_page_url = (
+                    f"{BASE_URLS[0]}{manga_name}/{chapter_decimal_str}-001.png"
+                )
                 if url_exists(first_page_url):
                     decimal_found_any = True
-                    chapter_folder = os.path.join(folder_base, f"chapter_{chapter_decimal_str}")
+                    chapter_folder = os.path.join(
+                        folder_base, f"chapter_{chapter_decimal_str}"
+                    )
                     os.makedirs(chapter_folder, exist_ok=True)
-                    urls = [f"{base}{manga_name}/{chapter_decimal_str}-{page:03d}.png" for base in BASE_URLS for page in range(1, max_pages + 1)]
+                    urls = [
+                        f"{base}{manga_name}/{chapter_decimal_str}-{page:03d}.png"
+                        for base in BASE_URLS
+                        for page in range(1, max_pages + 1)
+                    ]
                     pages_found = 0
 
                     with Progress(
-                        TextColumn(f"[bold yellow]Checking Chapter {chapter_decimal_str}[/]"),
+                        TextColumn(
+                            f"[bold yellow]Checking Chapter {chapter_decimal_str}[/]"
+                        ),
                         BarColumn(),
                         "[progress.percentage]{task.percentage:>3.1f}%",
-                        console=console
+                        console=console,
                     ) as progress:
                         task = progress.add_task("Checking", total=len(urls))
                         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -329,7 +385,9 @@ def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max
                             if exists:
                                 urls_to_download.append((url, chapter_folder))
                                 pages_found += 1
-                    console.print(f"[green]Chapter {chapter_decimal_str}: {pages_found} pages found[/]")
+                    console.print(
+                        f"[green]Chapter {chapter_decimal_str}: {pages_found} pages found[/]"
+                    )
 
             if not decimal_found_any:
                 console.print(f"[red]Chapter {chapter_str} not found. Stopping.[/]")
@@ -339,9 +397,9 @@ def gather_all_urls(manga_name, start_chapter=1, start_page=1, max_pages=50, max
 
     return urls_to_download
 
+
 # ------------------ DOWNLOAD WITH PROGRESS ------------------
 def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
-    manga_folder_name = sanitize_folder_name(manga_name)
     total_pages = len(urls_to_download)
     if total_pages == 0:
         return
@@ -356,7 +414,7 @@ def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
         "[progress.percentage]{task.percentage:>3.1f}%",
         "•",
         TextColumn("{task.fields[pages_per_sec]} pages/sec"),
-        console=console
+        console=console,
     ) as progress:
         task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
 
@@ -365,7 +423,9 @@ def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
             return download_image(url, folder)
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for idx, result in enumerate(executor.map(download_worker, urls_to_download), 1):
+            for idx, result in enumerate(
+                executor.map(download_worker, urls_to_download), 1
+            ):
                 if stop_signal:
                     break
                 elapsed = max(time.time() - start_time, 0.001)
@@ -373,6 +433,7 @@ def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
                 progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
                 if "Failed" in result or "HTTP" in result:
                     console.print(result)
+
 
 # ------------------ MANGADEX FUNCTIONS ------------------
 def extract_manga_uuid(url: str) -> str:
@@ -384,6 +445,7 @@ def extract_manga_uuid(url: str) -> str:
     except Exception:
         pass
     return None
+
 
 def fetch_all_chapters_md(manga_uuid: str, lang="en"):
     chapters = []
@@ -397,7 +459,7 @@ def fetch_all_chapters_md(manga_uuid: str, lang="en"):
             "translatedLanguage[]": lang,
             "limit": limit,
             "offset": offset,
-            "order[chapter]": "asc"
+            "order[chapter]": "asc",
         }
         resp = requests.get(f"{API_ENDPOINT}/chapter", params=params)
         if resp.status_code == 429:
@@ -416,6 +478,7 @@ def fetch_all_chapters_md(manga_uuid: str, lang="en"):
         offset += limit
     return chapters
 
+
 def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
     for attempt in range(max_retries):
         rate_limiter_athome.acquire("mangadex_athome")
@@ -426,7 +489,9 @@ def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
             time.sleep(wait)
             continue
         elif resp.status_code != 200:
-            console.print(f"[red]Error fetching chapter {chapter_id}: {resp.status_code}[/]")
+            console.print(
+                f"[red]Error fetching chapter {chapter_id}: {resp.status_code}[/]"
+            )
             return []
         chapter_data = resp.json().get("chapter", {})
         base_url = resp.json().get("baseUrl")
@@ -437,12 +502,13 @@ def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
         return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
     return []
 
+
 # ------------------ MANGADEX FUNCTIONS ------------------
 def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True):
     # Extract UUID and clean manga title
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
-        console.print(f"[red]Could not extract manga UUID from URL[/]")
+        console.print("[red]Could not extract manga UUID from URL[/]")
         return
 
     manga_name_clean = get_manga_name_from_md(manga_url, lang=lang)
@@ -476,7 +542,9 @@ def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True)
         console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
 
         urls_to_download = [(url, chapter_folder) for url in images]
-        download_all_pages(urls_to_download, max_workers=10, manga_name=manga_name_clean)
+        download_all_pages(
+            urls_to_download, max_workers=10, manga_name=manga_name_clean
+        )
 
         if not os.listdir(chapter_folder):
             console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
@@ -499,13 +567,16 @@ def get_manga_name_from_md(manga_url, lang="en"):
     title_dict = attributes.get("title", {})
     return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
 
+
 # Literal method to get from the manga link, instead of image URL
 async def check_url_weebcentral(url):
-    console.print(Panel.fit(
-        f"[bold magenta]WeebCentral ✨[/bold magenta]\n[yellow]{url}[/]",
-        title="[white on magenta] Weeb Mode [/]",
-        border_style="magenta"
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold magenta]WeebCentral ✨[/bold magenta]\n[yellow]{url}[/]",
+            title="[white on magenta] Weeb Mode [/]",
+            border_style="magenta",
+        )
+    )
 
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(headless=True)
@@ -515,7 +586,9 @@ async def check_url_weebcentral(url):
         try:
             response = await page.goto(url, wait_until="load", timeout=45000)
             if not response or response.status != 200:
-                console.print(f"[red] Failed to load page (status {response.status if response else 0})[/]")
+                console.print(
+                    f"[red] Failed to load page (status {response.status if response else 0})[/]"
+                )
                 return [], "Unknown_Title"
         except Exception as e:
             console.print(f"[red] Page load warning: {e}[/]")
@@ -543,28 +616,36 @@ async def check_url_weebcentral(url):
                 title = match.group(1)
                 break
 
-        browser.close()
+        await browser.close()
 
         # --- Fancy summary table ---
-        table = Table(title=f"[bold magenta]WeebCentral Extraction Summary[/bold magenta]")
+        table = Table(
+            title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
+        )
         table.add_column("Field", style="cyan", no_wrap=True)
         table.add_column("Value", style="white")
 
         table.add_row("Title", f"[bold white]{title}[/]")
         table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
-        table.add_row("Status", "[bold green]Success[/]" if img_urls else "[bold red]No images found[/]")
+        table.add_row(
+            "Status",
+            "[bold green]Success[/]" if img_urls else "[bold red]No images found[/]",
+        )
 
         console.print()
-        console.print(Panel(Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"))
+        console.print(
+            Panel(
+                Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"
+            )
+        )
 
         return img_urls, title
 
 
-# --------- Generate download url for weebcentral images ----------
-
-def generate_weebcentral_image_urls(manga_name, chapter, max_pages=50):
-    generated_url = f"https://weebcentral.com/manga/{manga_name}/{chapter:04d}-000.png"
-    return generated_url
+def create_single_weebcentral_url(title):
+    baseurl = BASE_URLS[0]
+    url = f"{baseurl}{title}/0001-001.png"
+    return url
 
 
 def safe_delete_folder(folder_path):
@@ -584,11 +665,12 @@ def safe_delete_folder(folder_path):
         console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
     except Exception as e:
         console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
-        
+
 
 # ------------------ CLI ------------------
 def parse_args():
     import argparse
+
     parser = argparse.ArgumentParser(description="Manga Downloader CLI")
     parser.add_argument("-M", "--manga", help="Manga name or MangaDex URL")
     parser.add_argument("--start-chapter", type=int)
@@ -596,8 +678,11 @@ def parse_args():
     parser.add_argument("--max-pages", type=int)
     parser.add_argument("--workers", type=int)
     parser.add_argument("--cbz", action="store_true")
-    parser.add_argument("--md-lang", default=None, help="Language code for MangaDex download")
+    parser.add_argument(
+        "--md-lang", default=None, help="Language code for MangaDex download"
+    )
     return parser.parse_args()
+
 
 # ------------------ MAIN ------------------
 def main():
@@ -614,61 +699,95 @@ def main():
 
     validate_manga_input(manga_name)
 
-    # Determine clean manga name
-    if manga_name.startswith("http") and "mangadex" in manga_name.lower():
-        download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
-        manga_name_clean = get_manga_name_from_md(manga_name, lang=md_lang)
-        manga_name_clean = sanitize_folder_name(manga_name_clean)
-    elif manga_name.startswith("https") and "weebcentral" in manga_name.lower():
-        img_urls, title = asyncio.run(check_url_weebcentral(manga_name))
-        slug, pretty_name = get_slug_and_pretty(title)  # ← ADD THIS LINE
-        generate_weebcentral_image_urls(title, start_chapter)
-        urls_to_download = gather_all_urls(
-            title,
-            start_chapter=start_chapter,
-            start_page=start_page,
-            max_pages=max_pages,
-            max_decimals=50,
-            workers=workers
+    # ---- MangaDex case ----
+    if manga_name.lower().startswith("http") and "mangadex" in manga_name.lower():
+        # download_md_chapters handles CBZ creation for us
+        download_md_chapters(
+            manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag
         )
-    download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+        return
 
-    if cbz_flag and not stop_signal:
-        if os.path.isdir(pretty_name) and any(
-            f for f in os.listdir(pretty_name) if not f.lower().endswith('.cbz')
-        ):
-            create_cbz_for_all(pretty_name)
-        else:
-            console.print(f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]")
+    # ---- WeebCentral explicit URL case ----
+    if manga_name.lower().startswith("http") and "weebcentral" in manga_name.lower():
+        console.print(
+            Panel.fit(
+                "[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"
+            )
+        )
+        img_urls, title = asyncio.run(check_url_weebcentral(manga_name))
+        pretty_name = sanitize_folder_name(title)
 
+        if not img_urls:
+            console.print("[red]No images detected, exiting WeebCentral mode.[/]")
+            sys.exit(1)
 
-        if cbz_flag and not stop_signal:
-    # only create CBZ if folder exists and has files
-            if os.path.isdir(pretty_name) and any(
-                (f for f in os.listdir(pretty_name) if not f.lower().endswith('.cbz'))
-            ):
-                create_cbz_for_all(pretty_name)
-            else:
-                console.print(f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]")
-    else:
-        # Separate slug (for URLs) from pretty folder name (for filesystem)
-        slug, pretty_name = get_slug_and_pretty(manga_name)
+        console.print(
+            f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
+        )
+        slug, pretty_name = get_slug_and_pretty(title)
         urls_to_download = gather_all_urls(
             slug,
             start_chapter=start_chapter,
             start_page=start_page,
             max_pages=max_pages,
             max_decimals=50,
-            workers=workers
+            workers=workers,
         )
-        download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+        if not urls_to_download:
+            console.print(
+                f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]"
+            )
+
+        download_all_pages(
+            urls_to_download, max_workers=workers, manga_name=pretty_name
+        )
+
         if cbz_flag and not stop_signal:
+            # only create CBZ if folder exists and has non-cbz files
+            if os.path.isdir(pretty_name) and any(
+                f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
+            ):
+                create_cbz_for_all(pretty_name)
+            else:
+                console.print(
+                    f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
+                )
+        return
+
+    # ---- Regular direct image source case (slug or plain name) ----
+    # treat the provided string as a slug for base URLs
+    # ------ normal web image link case ------
+    slug, pretty_name = get_slug_and_pretty(manga_name)
+    urls_to_download = gather_all_urls(
+        slug,
+        start_chapter=start_chapter,
+        start_page=start_page,
+        max_pages=max_pages,
+        max_decimals=50,
+        workers=workers,
+    )
+
+    if not urls_to_download:
+        console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
+        return
+
+    download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+
+    # ---- CBZ packaging ----
+    if cbz_flag and not stop_signal:
+        if os.path.isdir(pretty_name) and any(
+            f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
+        ):
             create_cbz_for_all(pretty_name)
-            
-    
-    
+        else:
+            console.print(
+                f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
+            )
+
+
 if __name__ == "__main__":
-    print("""
+    print(
+        """
 \033[96m          
  _ __ ___   __ _ _ __   __ _  __ _                       
 | '_ ` _ \\ / _` | '_ \\ / _` |/ _` |                      
@@ -680,65 +799,6 @@ if __name__ == "__main__":
 | (_| |  __/\\ V  V /| | | | | (_) | (_| | (_| |
  \\__,_|\\___| \\_/\\_/ |_| |_|_|\\___/ \\__,_|\\__,_|
 \033[0m
-""")
-
-    config = load_config()
-    args = parse_args()
-
-    manga_name = args.manga or config.get("manga_name")
-    start_chapter = args.start_chapter or config.get("start_chapter", 1)
-    start_page = args.start_page or config.get("start_page", 1)
-    max_pages = args.max_pages or config.get("max_pages", 50)
-    workers = args.workers or config.get("workers", 10)
-    cbz_flag = args.cbz or config.get("cbz", True)
-    md_lang = args.md_lang or config.get("md_language", "en")
-
-    validate_manga_input(manga_name)
-
-    # ---- MangaDex case ----
-    if "mangadex" in manga_name.lower():
-        download_md_chapters(manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag)
-
-    # ---- WeebCentral case ----
-    elif manga_name.startswith("https") and "weebcentral" in manga_name.lower():
-        console.print(Panel.fit("[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"))
-        img_urls, title = asyncio.run(check_url_weebcentral(manga_name))
-
-    if not img_urls:
-        console.print("[red]No images detected, exiting WeebCentral mode.[/]")
-        sys.exit(1)
-
-    slug, pretty_name = get_slug_and_pretty(title)
-    folder = sanitize_folder_name(pretty_name)
-    os.makedirs(folder, exist_ok=True)
-
-    console.print(f"[yellow]📥 Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]")
-    urls_to_download = [(u, folder) for u in img_urls]
-
-    download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
-
-    if cbz_flag and not stop_signal:
-        create_cbz_for_all(pretty_name)
-
-
-    # ---- Regular direct image source case ----
-    else:
-        slug, pretty_name = get_slug_and_pretty(manga_name)
-        urls_to_download = gather_all_urls(
-            slug,
-            start_chapter=start_chapter,
-            start_page=start_page,
-            max_pages=max_pages,
-            max_decimals=50,
-            workers=workers
-        )
-        download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
-
-    # ---- CBZ packaging ----
-    if cbz_flag and not stop_signal:
-        if os.path.isdir(pretty_name) and any(
-            f for f in os.listdir(pretty_name) if not f.lower().endswith('.cbz')
-        ):
-            create_cbz_for_all(pretty_name)
-        else:
-            console.print(f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]")
+"""
+    )
+    main()

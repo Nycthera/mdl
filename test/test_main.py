@@ -4,7 +4,7 @@ import zipfile
 import tempfile
 import shutil
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import main  # assuming your main script is named main.py
 
@@ -105,6 +105,8 @@ def temp_dir():
     d = tempfile.mkdtemp()
     yield d
     shutil.rmtree(d, ignore_errors=True)
+
+
 def test_safe_delete_folder(temp_dir):
     f = os.path.join(temp_dir, "dummy.txt")
     with open(f, "w") as file:
