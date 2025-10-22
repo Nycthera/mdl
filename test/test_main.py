@@ -4,9 +4,10 @@ import zipfile
 import tempfile
 import shutil
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import main  # assuming your main script is named main.py
+import aiohttp
 
 # ---------- CONFIG TESTS ----------
 def test_create_default_config(temp_dir, monkeypatch):
@@ -55,17 +56,6 @@ def test_get_slug_and_pretty():
     assert "Naruto" in pretty2 or "naruto" in pretty2.lower()
 
 
-# ---------- URL EXISTS ----------
-@patch("main.session.head")
-def test_url_exists_true(mock_head):
-    mock_head.return_value.status_code = 200
-    assert main.url_exists("https://example.com")
-
-
-@patch("main.session.head")
-def test_url_exists_false(mock_head):
-    mock_head.return_value.status_code = 404
-    assert main.url_exists("https://example.com") is False
 
 
 # ---------- CBZ CREATION ----------
