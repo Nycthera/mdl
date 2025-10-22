@@ -8,15 +8,6 @@ from unittest.mock import patch
 
 import main  # assuming your main script is named main.py
 
-
-# ---------- FIXTURES ----------
-@pytest.fixture
-def temp_dir():
-    d = tempfile.mkdtemp()
-    yield d
-    shutil.rmtree(d)
-
-
 # ---------- CONFIG TESTS ----------
 def test_create_default_config(temp_dir, monkeypatch):
     cfg_path = os.path.join(temp_dir, "config.json")

@@ -3,3 +3,4 @@ rich
 playwright
 playwright-stealth
 pytest
+aiohttp
