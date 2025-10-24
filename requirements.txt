@@ -1,7 +1,0 @@
-requests
-rich
-playwright
-playwright-stealth
-pytest
-aiohttp
-pytest-asyncio
