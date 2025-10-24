@@ -1,0 +1,40 @@
+name: Lint & Format
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint-format:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout the repo
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      # 2. Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # 3. Install dependencies
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black
+
+      # 4. Run Ruff (lint & auto-fix)
+      - name: Lint with Ruff
+        run: |
+          ruff check . --fix
+
+      # 5. Run Black (auto-format)
+      - name: Format with Black
+        run: |
+          black .
