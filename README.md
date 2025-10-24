@@ -181,6 +181,23 @@ mdl/
     └── package.json       # Node.js dependencies
 ```
 
+## Updating
+
+You can either download the lastest binary from the releases page or use
+
+``` bash
+
+py main.py --update
+```
+
+or
+
+``` bash
+mdl --update
+```
+
+if you already have the file on your path.
+
 ## 🤝 Contributing
 
 1. Fork the repository

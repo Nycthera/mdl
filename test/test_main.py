@@ -4,10 +4,9 @@ import zipfile
 import tempfile
 import shutil
 import pytest
-from unittest.mock import patch, AsyncMock
 
 import main  # assuming your main script is named main.py
-import aiohttp
+
 
 # ---------- CONFIG TESTS ----------
 def test_create_default_config(temp_dir, monkeypatch):
@@ -54,8 +53,6 @@ def test_get_slug_and_pretty():
     slug2, pretty2 = main.get_slug_and_pretty("https://site.com/manga/naruto/")
     assert "naruto" in slug2
     assert "Naruto" in pretty2 or "naruto" in pretty2.lower()
-
-
 
 
 # ---------- CBZ CREATION ----------

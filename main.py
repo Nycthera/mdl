@@ -25,6 +25,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.align import Align
 import aiohttp
+import platform
+import subprocess
 
 
 # ------------ CONSTANTS ------------
@@ -155,6 +157,7 @@ async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
     except asyncio.TimeoutError:
         # Timeout specifically
         return False
+
 
 # ------------------ RATE LIMITER ------------------
 class RateLimiter:
@@ -667,6 +670,140 @@ def safe_delete_folder(folder_path):
         console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
 
 
+# --------- Update functions -------------
+def update():
+    os_name = platform.system().lower()
+    base_path = os.getcwd()
+    print(f"Base path: {base_path}")
+
+    if os_name == "windows":
+        # -------- Windows --------
+        def run(cmd):
+            result = subprocess.run(cmd, shell=True)
+            if result.returncode != 0:
+                print(f"Command failed: {cmd}")
+                sys.exit(1)
+
+        # Check Python
+        try:
+            subprocess.run(
+                "where python", shell=True, check=True, stdout=subprocess.DEVNULL
+            )
+        except subprocess.CalledProcessError:
+            print("Error: Python is not installed or not in PATH.")
+            print("Install from https://www.python.org/downloads/")
+            return
+
+        # Check Node.js
+        try:
+            subprocess.run(
+                "where npm", shell=True, check=True, stdout=subprocess.DEVNULL
+            )
+        except subprocess.CalledProcessError:
+            print("Error: Node.js is not installed or not in PATH.")
+            print("Install from https://nodejs.org/")
+            return
+
+        # Create venv if missing
+        venv_path = os.path.join(base_path, "venv")
+        if not os.path.exists(venv_path):
+            print("Creating Python virtual environment...")
+            run("python -m venv venv")
+
+        # Activate venv
+        activate_cmd = os.path.join(venv_path, "Scripts", "activate.bat")
+        print(f"Activating virtual environment: {activate_cmd}")
+        # On Windows, subprocess can't change parent shell environment. Just use full paths below.
+
+        # Generate requirements.txt if missing
+        req_path = os.path.join(base_path, "requirements.txt")
+        if not os.path.exists(req_path):
+            print("Generating requirements.txt...")
+            with open(req_path, "w") as f:
+                f.write("requests\nrich\n")
+
+        # Install Python deps
+        run(f"{venv_path}\\Scripts\\python -m pip install --upgrade pip")
+        run(f"{venv_path}\\Scripts\\pip install -r {req_path}")
+
+        # Install Playwright
+        run(f"{venv_path}\\Scripts\\playwright install")
+
+        # Setup Manga-API
+        manga_api_path = os.path.join(base_path, "Manga-API")
+        if os.path.exists(os.path.join(manga_api_path, "package.json")):
+            run(f"cd {manga_api_path} && npm install")
+        else:
+            print("Warning: package.json not found in Manga-API. Skipping npm install.")
+
+    else:
+        # -------- macOS / Linux --------
+        def run(cmd):
+            result = subprocess.run(cmd, shell=True, executable="/bin/bash")
+            if result.returncode != 0:
+                print(f"Command failed: {cmd}")
+                sys.exit(1)
+
+        # Check Python
+        if (
+            subprocess.run(
+                "command -v python3", shell=True, executable="/bin/bash"
+            ).returncode
+            != 0
+        ):
+            print("Error: python3 is not installed.")
+            return
+
+        # Check Node.js
+        if (
+            subprocess.run(
+                "command -v npm", shell=True, executable="/bin/bash"
+            ).returncode
+            != 0
+        ):
+            print("Error: Node.js is not installed.")
+            return
+
+        # Create venv if missing
+        venv_path = os.path.join(base_path, "venv")
+        if not os.path.exists(venv_path):
+            print("Creating Python virtual environment...")
+            run("python3 -m venv venv")
+
+        # Activate venv
+        activate_cmd = os.path.join(venv_path, "bin", "activate")
+        print(f"Activating virtual environment: source {activate_cmd}")
+        # Again, subprocess cannot modify parent shell env, just use full paths
+
+        # Generate requirements.txt if missing
+        req_path = os.path.join(base_path, "requirements.txt")
+        if not os.path.exists(req_path):
+            print("Generating requirements.txt...")
+            with open(req_path, "w") as f:
+                f.write("requests\nrich\n")
+
+        # Install Python deps
+        run(f"{venv_path}/bin/python -m pip install --upgrade pip")
+        run(f"{venv_path}/bin/pip install -r {req_path}")
+
+        # Install Playwright
+        run(f"{venv_path}/bin/playwright install")
+
+        # Setup Manga-API
+        manga_api_path = os.path.join(base_path, "Manga-API")
+        if os.path.exists(os.path.join(manga_api_path, "package.json")):
+            run(f"cd {manga_api_path} && npm install")
+        else:
+            print("Warning: package.json not found in Manga-API. Skipping npm install.")
+
+    print("\nInstallation complete.")
+    if os_name == "windows":
+        print("To activate Python venv: call venv\\Scripts\\activate")
+    else:
+        print("To activate Python venv: source venv/bin/activate")
+    print("To start Node server: cd Manga-API && npm start")
+
+
 # ------------------ CLI ------------------
 def parse_args():
     import argparse
@@ -681,6 +818,7 @@ def parse_args():
     parser.add_argument(
         "--md-lang", default=None, help="Language code for MangaDex download"
     )
+    parser.add_argument("--update", action="store_true", help="Update the application")
     return parser.parse_args()
 
 
@@ -696,6 +834,11 @@ def main():
     workers = args.workers or config.get("workers", 10)
     cbz_flag = args.cbz or config.get("cbz", True)
     md_lang = args.md_lang or config.get("md_language", "en")
+    update_flag = args.update or config.get("update", False)
+
+    if update_flag:
+        update()
+        return
 
     validate_manga_input(manga_name)
 
