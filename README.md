@@ -147,13 +147,13 @@ curl "http://localhost:3000/api/search?query=one-piece"
 
 The integrated Node.js server provides 5 RESTful endpoints:
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/search` | GET | Search manga with pagination support |
-| `/api/chapter-info` | GET | Detailed manga metadata and ratings |
-| `/api/fetch-chapter` | GET | Chapter images and navigation |
-| `/api/latest-release` | GET | Recent manga releases |
-| `/api/latest-manga` | GET | Latest manga with filtering |
+| Endpoint              | Method | Description                          |
+| --------------------- | ------ | ------------------------------------ |
+| `/api/search`         | GET    | Search manga with pagination support |
+| `/api/chapter-info`   | GET    | Detailed manga metadata and ratings  |
+| `/api/fetch-chapter`  | GET    | Chapter images and navigation        |
+| `/api/latest-release` | GET    | Recent manga releases                |
+| `/api/latest-manga`   | GET    | Latest manga with filtering          |
 
 ## 🎯 Technical Challenges Solved
 
@@ -185,14 +185,14 @@ mdl/
 
 You can either download the lastest binary from the releases page or use
 
-``` bash
+```bash
 
 py main.py --update
 ```
 
 or
 
-``` bash
+```bash
 mdl --update
 ```
 

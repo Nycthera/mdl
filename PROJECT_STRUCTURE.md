@@ -1,6 +1,6 @@
 # Project Structure
 
-``` text
+```text
 mdl/
 ├── main.py                 # Core Python CLI application
 ├── test.py                 # API integration testing

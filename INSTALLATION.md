@@ -92,13 +92,13 @@ The application creates a config file at `~/.config/manga_downloader/config.json
 
 ```json
 {
-    "manga_name": "",
-    "start_chapter": 1,
-    "start_page": 1,
-    "max_pages": 50,
-    "workers": 10,
-    "cbz": true,
-    "md_language": "en"
+  "manga_name": "",
+  "start_chapter": 1,
+  "start_page": 1,
+  "max_pages": 50,
+  "workers": 10,
+  "cbz": true,
+  "md_language": "en"
 }
 ```
 
