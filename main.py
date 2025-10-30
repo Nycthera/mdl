@@ -24,7 +24,6 @@ from urllib.parse import urljoin
 from rich.panel import Panel
 from rich.table import Table
 from rich.align import Align
-import aiohttp
 import platform
 import subprocess
 
@@ -142,23 +141,11 @@ def extract_manga_name_from_url(manga_input):
             return name.replace("-", " ")
     return manga_input
 
-
-async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
-    """
-    Check if a URL exists using an async HEAD request.
-    Returns True if status == 200, False otherwise.
-    """
+def url_exists(url: str) -> bool:
     try:
-        async with session.head(url, allow_redirects=True, timeout=5) as resp:
-            return resp.status == 200
-    except aiohttp.ClientError:
-        # Network-related exceptions: connection errors, timeouts, etc.
+        return requests.head(url, allow_redirects=True, timeout=5).status_code == 200
+    except requests.RequestException:
         return False
-    except asyncio.TimeoutError:
-        # Timeout specifically
-        return False
-
-
 # ------------------ RATE LIMITER ------------------
 class RateLimiter:
     def __init__(self, max_calls=5, per_seconds=1):

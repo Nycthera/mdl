@@ -92,3 +92,45 @@ def test_safe_delete_folder(temp_dir):
     main.safe_delete_folder(temp_dir)
     assert not os.path.exists(f)
     assert not os.path.exists(temp_dir)
+
+
+
+def test_extract_manga_uuid_valid():
+    url = "https://mangadex.org/title/123e4567-e89b-12d3-a456-426614174000/foobar"
+    assert main.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
+
+
+def test_extract_manga_uuid_invalid():
+    url = "https://mangadex.org/chapter/abcdef"
+    assert main.extract_manga_uuid(url) is None
+
+
+def test_get_manga_name_from_md_fallback(monkeypatch):
+    # Force extract_manga_uuid to return None to hit fallback path
+    monkeypatch.setattr(main, "extract_manga_uuid", lambda u: None)
+    assert main.get_manga_name_from_md("https://mangadex.org/title/some", lang="jp") == \
+        main.extract_manga_name_from_url("https://mangadex.org/title/some")
+
+
+def test_get_slug_and_pretty_collapses_spaces():
+    slug, pretty = main.get_slug_and_pretty(" My   Hero   Academia ")
+    assert slug == "My-Hero-Academia"
+    assert pretty == "My Hero Academia"
+
+
+def test_create_cbz_skips_when_no_files(temp_dir, capsys):
+    empty_folder = os.path.join(temp_dir, "Empty Manga")
+    os.makedirs(empty_folder)
+    main.create_cbz_for_all(empty_folder)
+    # No cbz file should be created
+    assert not any(f.endswith(".cbz") for f in os.listdir(empty_folder))
+
+
+def test_download_image_http_error(monkeypatch, temp_dir):
+    class DummyResp:
+        def raise_for_status(self):
+            raise main.requests.HTTPError("bad")
+    # Patch the session.get to return DummyResp
+    monkeypatch.setattr(main.session, "get", lambda url, timeout=15: DummyResp())
+    msg = main.download_image("http://example.com/x.png", temp_dir)
+    assert "HTTP error" in msg
