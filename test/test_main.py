@@ -94,7 +94,6 @@ def test_safe_delete_folder(temp_dir):
     assert not os.path.exists(temp_dir)
 
 
-
 def test_extract_manga_uuid_valid():
     url = "https://mangadex.org/title/123e4567-e89b-12d3-a456-426614174000/foobar"
     assert main.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
@@ -108,8 +107,9 @@ def test_extract_manga_uuid_invalid():
 def test_get_manga_name_from_md_fallback(monkeypatch):
     # Force extract_manga_uuid to return None to hit fallback path
     monkeypatch.setattr(main, "extract_manga_uuid", lambda u: None)
-    assert main.get_manga_name_from_md("https://mangadex.org/title/some", lang="jp") == \
-        main.extract_manga_name_from_url("https://mangadex.org/title/some")
+    assert main.get_manga_name_from_md(
+        "https://mangadex.org/title/some", lang="jp"
+    ) == main.extract_manga_name_from_url("https://mangadex.org/title/some")
 
 
 def test_get_slug_and_pretty_collapses_spaces():
@@ -130,6 +130,7 @@ def test_download_image_http_error(monkeypatch, temp_dir):
     class DummyResp:
         def raise_for_status(self):
             raise main.requests.HTTPError("bad")
+
     # Patch the session.get to return DummyResp
     monkeypatch.setattr(main.session, "get", lambda url, timeout=15: DummyResp())
     msg = main.download_image("http://example.com/x.png", temp_dir)

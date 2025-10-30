@@ -141,11 +141,14 @@ def extract_manga_name_from_url(manga_input):
             return name.replace("-", " ")
     return manga_input
 
+
 def url_exists(url: str) -> bool:
     try:
         return requests.head(url, allow_redirects=True, timeout=5).status_code == 200
     except requests.RequestException:
         return False
+
+
 # ------------------ RATE LIMITER ------------------
 class RateLimiter:
     def __init__(self, max_calls=5, per_seconds=1):
