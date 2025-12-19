@@ -140,9 +140,12 @@ def extract_manga_name_from_url(manga_input):
 
 async def url_exists(url: str) -> bool:
     import aiohttp
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.head(
+                url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
                 return response.status == 200
     except Exception:
         return False
@@ -181,6 +184,7 @@ rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
 # ------------------ DOWNLOAD ------------------
 async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
     import aiohttp
+
     if stop_signal:
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
     os.makedirs(folder, exist_ok=True)
@@ -192,7 +196,9 @@ async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
     for attempt in range(1, max_retries + 1):
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=15)
+                ) as r:
                     r.raise_for_status()
                     content = await r.read()
                     with open(filepath, "wb") as f:
@@ -317,7 +323,10 @@ async def gather_all_urls(
         if stop_signal:
             break
         chapter_str = f"{chapter:04d}"
-        check_tasks = [url_exists(f"{base}{manga_name}/{chapter_str}-001.png") for base in BASE_URLS]
+        check_tasks = [
+            url_exists(f"{base}{manga_name}/{chapter_str}-001.png")
+            for base in BASE_URLS
+        ]
         results = await asyncio.gather(*check_tasks)
         found_any = any(results)
 
@@ -375,7 +384,9 @@ async def gather_all_urls(
                         console=console,
                     ) as progress:
                         task = progress.add_task("Checking", total=len(urls))
-                        results = await asyncio.gather(*[url_exists(url) for url in urls])
+                        results = await asyncio.gather(
+                            *[url_exists(url) for url in urls]
+                        )
                         for url, exists in zip(urls, results):
                             progress.update(task, advance=1)
                             if exists:
@@ -443,6 +454,7 @@ def extract_manga_uuid(url: str) -> str:
 
 async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
     import aiohttp
+
     chapters = []
     limit = 100
     offset = 0
@@ -459,7 +471,9 @@ async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
         async with aiohttp.ClientSession() as session:
             async with session.get(f"{API_ENDPOINT}/chapter", params=params) as resp:
                 if resp.status == 429:
-                    console.print("[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]")
+                    console.print(
+                        "[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]"
+                    )
                     await asyncio.sleep(5)
                     continue
                 elif resp.status != 200:
@@ -477,10 +491,13 @@ async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
 
 async def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
     import aiohttp
+
     for attempt in range(max_retries):
         await rate_limiter_athome.acquire("mangadex_athome")
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"https://api.mangadex.org/at-home/server/{chapter_id}") as resp:
+            async with session.get(
+                f"https://api.mangadex.org/at-home/server/{chapter_id}"
+            ) as resp:
                 if resp.status == 429:
                     wait = (attempt + 1) * 5
                     console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
@@ -556,6 +573,7 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
 
 async def get_manga_name_from_md(manga_url, lang="en"):
     import aiohttp
+
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         return extract_manga_name_from_url(manga_url)
@@ -567,7 +585,11 @@ async def get_manga_name_from_md(manga_url, lang="en"):
             data_obj = data.get("data", {})
             attributes = data_obj.get("attributes", {})
             title_dict = attributes.get("title", {})
-            return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
+            return (
+                title_dict.get(lang)
+                or title_dict.get("en")
+                or list(title_dict.values())[0]
+            )
 
 
 # Literal method to get from the manga link, instead of image URL
@@ -913,7 +935,9 @@ async def main():
         console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
         return
 
-    await download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+    await download_all_pages(
+        urls_to_download, max_workers=workers, manga_name=pretty_name
+    )
 
     # ---- CBZ packaging ----
     if cbz_flag and not stop_signal:
