@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# todo: fix bug on line 707 and add fixes for aiohttp chunked encoding error
 import os
 import sys
 import json
@@ -8,12 +7,9 @@ import zipfile
 import signal
 import time
 from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor
 import requests
-from requests.exceptions import ChunkedEncodingError, ConnectionError
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn
-import threading
 import re
 from collections import defaultdict
 import pathlib
@@ -142,10 +138,13 @@ def extract_manga_name_from_url(manga_input):
     return manga_input
 
 
-def url_exists(url: str) -> bool:
+async def url_exists(url: str) -> bool:
+    import aiohttp
     try:
-        return requests.head(url, allow_redirects=True, timeout=5).status_code == 200
-    except requests.RequestException:
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                return response.status == 200
+    except Exception:
         return False
 
 
@@ -154,18 +153,24 @@ class RateLimiter:
     def __init__(self, max_calls=5, per_seconds=1):
         self.max_calls = max_calls
         self.per_seconds = per_seconds
-        self.lock = threading.Lock()
+        self._lock = None
         self.calls = defaultdict(list)
 
-    def acquire(self, key="global"):
-        with self.lock:
+    async def _get_lock(self):
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
+
+    async def acquire(self, key="global"):
+        lock = await self._get_lock()
+        async with lock:
             now = time.time()
             calls = self.calls[key]
             while calls and calls[0] <= now - self.per_seconds:
                 calls.pop(0)
             if len(calls) >= self.max_calls:
                 sleep_for = self.per_seconds - (now - calls[0])
-                time.sleep(max(sleep_for, 0))
+                await asyncio.sleep(max(sleep_for, 0))
             self.calls[key].append(time.time())
 
 
@@ -174,7 +179,8 @@ rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
 
 
 # ------------------ DOWNLOAD ------------------
-def download_image(url, folder, max_retries=5, backoff_factor=1.0):
+async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
+    import aiohttp
     if stop_signal:
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
     os.makedirs(folder, exist_ok=True)
@@ -185,17 +191,17 @@ def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 
     for attempt in range(1, max_retries + 1):
         try:
-            r = session.get(url, timeout=15)
-            r.raise_for_status()
-            with open(filepath, "wb") as f:
-                f.write(r.content)
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                    r.raise_for_status()
+                    content = await r.read()
+                    with open(filepath, "wb") as f:
+                        f.write(content)
             return f"{Colors.GREEN}Saved as {filepath}{Colors.RESET}"
-        except (ChunkedEncodingError, ConnectionError) as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             if attempt == max_retries:
                 return f"{Colors.RED}Failed to download {filename} after {max_retries} attempts: {e}{Colors.RESET}"
-            time.sleep(backoff_factor * attempt)
-        except requests.HTTPError as e:
-            return f"{Colors.RED}HTTP error for {filename}: {e}{Colors.RESET}"
+            await asyncio.sleep(backoff_factor * attempt)
         except Exception as e:
             return f"{Colors.RED}Unexpected error for {filename}: {e}{Colors.RESET}"
 
@@ -299,7 +305,7 @@ def get_slug_and_pretty(manga_input: str):
 
 
 # ------------------ URL GATHERING WITH PROGRESS ------------------
-def gather_all_urls(
+async def gather_all_urls(
     manga_name, start_chapter=1, start_page=1, max_pages=50, max_decimals=5, workers=10
 ):
     urls_to_download = []
@@ -311,10 +317,9 @@ def gather_all_urls(
         if stop_signal:
             break
         chapter_str = f"{chapter:04d}"
-        found_any = any(
-            url_exists(f"{base}{manga_name}/{chapter_str}-001.png")
-            for base in BASE_URLS
-        )
+        check_tasks = [url_exists(f"{base}{manga_name}/{chapter_str}-001.png") for base in BASE_URLS]
+        results = await asyncio.gather(*check_tasks)
+        found_any = any(results)
 
         if found_any:
             chapter_folder = os.path.join(folder_base, f"chapter_{chapter_str}")
@@ -333,8 +338,7 @@ def gather_all_urls(
                 console=console,
             ) as progress:
                 task = progress.add_task("Checking", total=len(urls))
-                with ThreadPoolExecutor(max_workers=workers) as executor:
-                    results = list(executor.map(url_exists, urls))
+                results = await asyncio.gather(*[url_exists(url) for url in urls])
                 for url, exists in zip(urls, results):
                     progress.update(task, advance=1)
                     if exists:
@@ -349,7 +353,7 @@ def gather_all_urls(
                 first_page_url = (
                     f"{BASE_URLS[0]}{manga_name}/{chapter_decimal_str}-001.png"
                 )
-                if url_exists(first_page_url):
+                if await url_exists(first_page_url):
                     decimal_found_any = True
                     chapter_folder = os.path.join(
                         folder_base, f"chapter_{chapter_decimal_str}"
@@ -371,8 +375,7 @@ def gather_all_urls(
                         console=console,
                     ) as progress:
                         task = progress.add_task("Checking", total=len(urls))
-                        with ThreadPoolExecutor(max_workers=workers) as executor:
-                            results = list(executor.map(url_exists, urls))
+                        results = await asyncio.gather(*[url_exists(url) for url in urls])
                         for url, exists in zip(urls, results):
                             progress.update(task, advance=1)
                             if exists:
@@ -392,7 +395,7 @@ def gather_all_urls(
 
 
 # ------------------ DOWNLOAD WITH PROGRESS ------------------
-def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
+async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
     total_pages = len(urls_to_download)
     if total_pages == 0:
         return
@@ -411,21 +414,19 @@ def download_all_pages(urls_to_download, max_workers=10, manga_name="manga"):
     ) as progress:
         task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
 
-        def download_worker(args):
+        async def download_worker(args):
             url, folder = args
-            return download_image(url, folder)
+            return await download_image(url, folder)
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            for idx, result in enumerate(
-                executor.map(download_worker, urls_to_download), 1
-            ):
-                if stop_signal:
-                    break
-                elapsed = max(time.time() - start_time, 0.001)
-                pps = idx / elapsed
-                progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
-                if "Failed" in result or "HTTP" in result:
-                    console.print(result)
+        tasks = [download_worker(item) for item in urls_to_download]
+        for idx, result in enumerate(await asyncio.gather(*tasks), 1):
+            if stop_signal:
+                break
+            elapsed = max(time.time() - start_time, 0.001)
+            pps = idx / elapsed
+            progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
+            if "Failed" in result or "HTTP" in result:
+                console.print(result)
 
 
 # ------------------ MANGADEX FUNCTIONS ------------------
@@ -440,13 +441,14 @@ def extract_manga_uuid(url: str) -> str:
     return None
 
 
-def fetch_all_chapters_md(manga_uuid: str, lang="en"):
+async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
+    import aiohttp
     chapters = []
     limit = 100
     offset = 0
 
     while True:
-        rate_limiter_athome.acquire("mangadex_api")
+        await rate_limiter_athome.acquire("mangadex_api")
         params = {
             "manga": manga_uuid,
             "translatedLanguage[]": lang,
@@ -454,57 +456,61 @@ def fetch_all_chapters_md(manga_uuid: str, lang="en"):
             "offset": offset,
             "order[chapter]": "asc",
         }
-        resp = requests.get(f"{API_ENDPOINT}/chapter", params=params)
-        if resp.status_code == 429:
-            console.print("[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]")
-            time.sleep(5)
-            continue
-        elif resp.status_code != 200:
-            console.print(f"[red]Error fetching chapters: {resp.status_code}[/]")
-            break
-        data = resp.json()
-        batch = data.get("data", [])
-        chapters.extend(batch)
-        total = data.get("total", 0)
-        if offset + limit >= total:
-            break
-        offset += limit
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{API_ENDPOINT}/chapter", params=params) as resp:
+                if resp.status == 429:
+                    console.print("[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]")
+                    await asyncio.sleep(5)
+                    continue
+                elif resp.status != 200:
+                    console.print(f"[red]Error fetching chapters: {resp.status}[/]")
+                    break
+                data = await resp.json()
+                batch = data.get("data", [])
+                chapters.extend(batch)
+                total = data.get("total", 0)
+                if offset + limit >= total:
+                    break
+                offset += limit
     return chapters
 
 
-def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
+async def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
+    import aiohttp
     for attempt in range(max_retries):
-        rate_limiter_athome.acquire("mangadex_athome")
-        resp = requests.get(f"https://api.mangadex.org/at-home/server/{chapter_id}")
-        if resp.status_code == 429:
-            wait = (attempt + 1) * 5
-            console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
-            time.sleep(wait)
-            continue
-        elif resp.status_code != 200:
-            console.print(
-                f"[red]Error fetching chapter {chapter_id}: {resp.status_code}[/]"
-            )
-            return []
-        chapter_data = resp.json().get("chapter", {})
-        base_url = resp.json().get("baseUrl")
-        hash_code = chapter_data.get("hash")
-        pages = chapter_data.get("dataSaver" if use_saver else "data", [])
-        if not base_url or not hash_code or not pages:
-            return []
-        return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
+        await rate_limiter_athome.acquire("mangadex_athome")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"https://api.mangadex.org/at-home/server/{chapter_id}") as resp:
+                if resp.status == 429:
+                    wait = (attempt + 1) * 5
+                    console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
+                    await asyncio.sleep(wait)
+                    continue
+                elif resp.status != 200:
+                    console.print(
+                        f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]"
+                    )
+                    return []
+                data = await resp.json()
+                chapter_data = data.get("chapter", {})
+                base_url = data.get("baseUrl")
+                hash_code = chapter_data.get("hash")
+                pages = chapter_data.get("dataSaver" if use_saver else "data", [])
+                if not base_url or not hash_code or not pages:
+                    return []
+                return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
     return []
 
 
 # ------------------ MANGADEX FUNCTIONS ------------------
-def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True):
+async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True):
     # Extract UUID and clean manga title
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         console.print("[red]Could not extract manga UUID from URL[/]")
         return
 
-    manga_name_clean = get_manga_name_from_md(manga_url, lang=lang)
+    manga_name_clean = await get_manga_name_from_md(manga_url, lang=lang)
     manga_name_clean = sanitize_folder_name(manga_name_clean)
 
     # Root folder named after manga
@@ -512,7 +518,7 @@ def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True)
     os.makedirs(manga_root_folder, exist_ok=True)
 
     console.print(f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]")
-    chapters = fetch_all_chapters_md(manga_uuid, lang)
+    chapters = await fetch_all_chapters_md(manga_uuid, lang)
     console.print(f"[green]Found {len(chapters)} chapters[/]")
 
     for chapter in chapters:
@@ -526,7 +532,7 @@ def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True)
         chapter_folder_name = sanitize_folder_name(chapter_folder_name)
         chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
 
-        images = get_images_md(chap_id, use_saver=use_saver)
+        images = await get_images_md(chap_id, use_saver=use_saver)
         if not images:
             console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
             continue
@@ -535,7 +541,7 @@ def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True)
         console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
 
         urls_to_download = [(url, chapter_folder) for url in images]
-        download_all_pages(
+        await download_all_pages(
             urls_to_download, max_workers=10, manga_name=manga_name_clean
         )
 
@@ -548,17 +554,20 @@ def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz=True)
         create_cbz_for_all(manga_root_folder)
 
 
-def get_manga_name_from_md(manga_url, lang="en"):
+async def get_manga_name_from_md(manga_url, lang="en"):
+    import aiohttp
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         return extract_manga_name_from_url(manga_url)
-    resp = requests.get(f"{API_ENDPOINT}/manga/{manga_uuid}")
-    if resp.status_code != 200:
-        return extract_manga_name_from_url(manga_url)
-    data = resp.json().get("data", {})
-    attributes = data.get("attributes", {})
-    title_dict = attributes.get("title", {})
-    return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{API_ENDPOINT}/manga/{manga_uuid}") as resp:
+            if resp.status != 200:
+                return extract_manga_name_from_url(manga_url)
+            data = await resp.json()
+            data_obj = data.get("data", {})
+            attributes = data_obj.get("attributes", {})
+            title_dict = attributes.get("title", {})
+            return title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
 
 
 # Literal method to get from the manga link, instead of image URL
@@ -813,7 +822,7 @@ def parse_args():
 
 
 # ------------------ MAIN ------------------
-def main():
+async def main():
     config = load_config()
     args = parse_args()
 
@@ -835,7 +844,7 @@ def main():
     # ---- MangaDex case ----
     if manga_name.lower().startswith("http") and "mangadex" in manga_name.lower():
         # download_md_chapters handles CBZ creation for us
-        download_md_chapters(
+        await download_md_chapters(
             manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag
         )
         return
@@ -847,7 +856,7 @@ def main():
                 "[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"
             )
         )
-        img_urls, title = asyncio.run(check_url_weebcentral(manga_name))
+        img_urls, title = await check_url_weebcentral(manga_name)
         pretty_name = sanitize_folder_name(title)
 
         if not img_urls:
@@ -858,7 +867,7 @@ def main():
             f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
         )
         slug, pretty_name = get_slug_and_pretty(title)
-        urls_to_download = gather_all_urls(
+        urls_to_download = await gather_all_urls(
             slug,
             start_chapter=start_chapter,
             start_page=start_page,
@@ -871,7 +880,7 @@ def main():
                 f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]"
             )
 
-        download_all_pages(
+        await download_all_pages(
             urls_to_download, max_workers=workers, manga_name=pretty_name
         )
 
@@ -891,7 +900,7 @@ def main():
     # treat the provided string as a slug for base URLs
     # ------ normal web image link case ------
     slug, pretty_name = get_slug_and_pretty(manga_name)
-    urls_to_download = gather_all_urls(
+    urls_to_download = await gather_all_urls(
         slug,
         start_chapter=start_chapter,
         start_page=start_page,
@@ -904,7 +913,7 @@ def main():
         console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
         return
 
-    download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
+    await download_all_pages(urls_to_download, max_workers=workers, manga_name=pretty_name)
 
     # ---- CBZ packaging ----
     if cbz_flag and not stop_signal:
@@ -934,4 +943,4 @@ if __name__ == "__main__":
 \033[0m
 """
     )
-    main()
+    asyncio.run(main())
