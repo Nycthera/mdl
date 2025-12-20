@@ -22,6 +22,8 @@ from rich.table import Table
 from rich.align import Align
 import platform
 import subprocess
+import aiohttp
+import argparse
 
 
 # ------------ CONSTANTS ------------
@@ -139,7 +141,6 @@ def extract_manga_name_from_url(manga_input):
 
 
 async def url_exists(url: str) -> bool:
-    import aiohttp
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -183,7 +184,6 @@ rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
 
 # ------------------ DOWNLOAD ------------------
 async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
-    import aiohttp
 
     if stop_signal:
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
@@ -453,7 +453,6 @@ def extract_manga_uuid(url: str) -> str:
 
 
 async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
-    import aiohttp
 
     chapters = []
     limit = 100
@@ -490,7 +489,6 @@ async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
 
 
 async def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
-    import aiohttp
 
     for attempt in range(max_retries):
         await rate_limiter_athome.acquire("mangadex_athome")
@@ -572,7 +570,6 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
 
 
 async def get_manga_name_from_md(manga_url, lang="en"):
-    import aiohttp
 
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
@@ -827,7 +824,7 @@ def update():
 
 # ------------------ CLI ------------------
 def parse_args():
-    import argparse
+    
 
     parser = argparse.ArgumentParser(description="Manga Downloader CLI")
     parser.add_argument("-M", "--manga", help="Manga name or MangaDex URL")

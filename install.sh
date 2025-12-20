@@ -26,6 +26,11 @@ if [ ! -f "$base_path/requirements.txt" ]; then
     cat <<EOF > requirements.txt
 requests
 rich
+playwright
+playwright-stealth
+pytest
+aiohttp
+pytest-asyncio
 EOF
 fi
 
