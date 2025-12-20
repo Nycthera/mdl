@@ -13,7 +13,7 @@
 
 ### Core Components
 
-- **🐍 Python CLI Application** - Multi-threaded downloader with real-time progress tracking
+- **🐍 Python CLI Application** - Async/await downloader with concurrent processing and real-time progress tracking
 - **🚀 Node.js REST API** - Web scraping service with 5 RESTful endpoints
 - **🔄 Multi-Source Integration** - MangaDx API + web scraping with automatic failover
 - **📊 Real-Time Analytics** - Pages/second metrics and progress visualization
@@ -22,10 +22,10 @@
 
 ### Concurrency & Performance
 
-- **Multi-threaded Processing** - ThreadPoolExecutor with configurable worker pools (up to 10 concurrent downloads)
-- **Intelligent Rate Limiting** - Exponential backoff retry mechanism to handle server constraints
-- **Connection Pooling** - Reused HTTP sessions for optimized network performance
-- **Memory Efficient** - Streaming downloads to prevent memory exhaustion
+- **Async/Await Processing** - asyncio with concurrent tasks for non-blocking downloads (up to 10 concurrent connections)
+- **Intelligent Rate Limiting** - RateLimiter class with exponential backoff to handle server constraints
+- **Connection Pooling** - aiohttp ClientSession with persistent connections for optimized network performance
+- **Memory Efficient** - Streaming downloads with async file I/O to prevent memory exhaustion
 
 ### Data Source Resilience
 
@@ -45,9 +45,9 @@
 
 ### Backend Development
 
-- **Python 3.13** - Advanced features including context managers, signal handling, concurrent processing
+- **Python 3.13** - Advanced features including async/await, context managers, signal handling, and asyncio
 - **Node.js/Express.js** - RESTful API design with proper middleware and error handling
-- **Multi-threading** - ThreadPoolExecutor for parallel processing optimization
+- **Async Concurrency** - asyncio with aiohttp for high-performance, non-blocking HTTP operations
 
 ### Data Engineering
 
@@ -121,10 +121,10 @@ curl "http://localhost:3000/api/search?query=one-piece"
 
 ## 📊 Performance Metrics
 
-- **Concurrent Downloads**: Up to 10 simultaneous connections
-- **Error Recovery**: Exponential backoff with 5 retry attempts
-- **Progress Tracking**: Real-time pages/second visualization
-- **Memory Efficient**: Streaming downloads for large manga collections
+- **Async Concurrency**: Up to 10 concurrent tasks without thread overhead
+- **Error Recovery**: Exponential backoff with 5 retry attempts and async timeout handling
+- **Progress Tracking**: Real-time pages/second visualization with non-blocking updates
+- **Memory Efficient**: Async streaming downloads with aiohttp for large manga collections
 
 ## 🧪 Testing & Quality
 

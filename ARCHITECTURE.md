@@ -8,11 +8,11 @@ MDL implements a dual-architecture approach combining a Python CLI application w
 
 ### Python CLI Application (`main.py`)
 
-- **Concurrency Model**: ThreadPoolExecutor with configurable worker pools
-- **Data Sources**: Multi-source approach with automatic fallback
-- **Progress Tracking**: Real-time metrics with Rich library integration
-- **Error Handling**: Exponential backoff retry mechanism
-- **Configuration**: JSON-based user configuration management
+- **Concurrency Model**: asyncio with aiohttp for non-blocking, high-concurrency downloads
+- **Data Sources**: Multi-source approach with automatic failover across manga hosting services
+- **Progress Tracking**: Real-time metrics with Rich library integration and async-compatible updates
+- **Error Handling**: RateLimiter class with exponential backoff and async timeout management
+- **Configuration**: JSON-based user configuration management with graceful signal handling
 
 ### Node.js API Server (`Manga-API/`)
 
@@ -31,14 +31,14 @@ MDL implements a dual-architecture approach combining a Python CLI application w
 
 ## Performance Optimizations
 
-- **Connection Pooling**: Reused HTTP sessions for reduced overhead
-- **Batch Processing**: Efficient URL validation with parallel requests
-- **Memory Management**: Streaming downloads to prevent memory exhaustion
-- **Progress Visualization**: Non-blocking UI updates during long operations
+- **Async HTTP Pooling**: aiohttp ClientSession for connection reuse and reduced overhead
+- **Concurrent Task Batching**: asyncio.gather() for parallel URL validation and downloads without thread context switching
+- **Memory Management**: Async streaming downloads with incremental file writes to prevent memory exhaustion
+- **Progress Visualization**: Non-blocking Rich progress bars with async task updates and real-time metrics
 
 ## Testing Strategy
 
-- **Unit Testing**: Comprehensive pytest suite with mocking
-- **Integration Testing**: API endpoint validation
-- **CI/CD Pipeline**: Automated testing on push/PR
-- **Error Simulation**: Connection failure and timeout testing
+- **Unit Testing**: Comprehensive pytest suite with pytest-asyncio for async test support
+- **Integration Testing**: Async API endpoint validation with aiohttp test clients
+- **CI/CD Pipeline**: Automated testing on push/PR with Playwright browser automation
+- **Error Simulation**: Async connection failure and timeout testing with proper async/await patterns
