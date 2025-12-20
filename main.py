@@ -141,7 +141,6 @@ def extract_manga_name_from_url(manga_input):
 
 
 async def url_exists(url: str) -> bool:
-
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(
@@ -184,7 +183,6 @@ rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
 
 # ------------------ DOWNLOAD ------------------
 async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
-
     if stop_signal:
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
     os.makedirs(folder, exist_ok=True)
@@ -453,7 +451,6 @@ def extract_manga_uuid(url: str) -> str:
 
 
 async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
-
     chapters = []
     limit = 100
     offset = 0
@@ -489,7 +486,6 @@ async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
 
 
 async def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
-
     for attempt in range(max_retries):
         await rate_limiter_athome.acquire("mangadex_athome")
         async with aiohttp.ClientSession() as session:
@@ -570,7 +566,6 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
 
 
 async def get_manga_name_from_md(manga_url, lang="en"):
-
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         return extract_manga_name_from_url(manga_url)
@@ -824,8 +819,6 @@ def update():
 
 # ------------------ CLI ------------------
 def parse_args():
-    
-
     parser = argparse.ArgumentParser(description="Manga Downloader CLI")
     parser.add_argument("-M", "--manga", help="Manga name or MangaDex URL")
     parser.add_argument("--start-chapter", type=int)
