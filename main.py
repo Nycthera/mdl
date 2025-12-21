@@ -1,29 +1,32 @@
 #!/usr/bin/env python3
-import os
-import sys
-import json
-import shutil
-import zipfile
-import signal
-import time
-from urllib.parse import urlparse
-import requests
-from rich.console import Console
-from rich.progress import Progress, BarColumn, TextColumn
-import re
-from collections import defaultdict
-import pathlib
-from playwright_stealth import Stealth
-from playwright.async_api import async_playwright
-import asyncio
-from urllib.parse import urljoin
-from rich.panel import Panel
-from rich.table import Table
-from rich.align import Align
-import platform
-import subprocess
-import aiohttp
+# Standard library
 import argparse
+import asyncio
+import json
+import os
+import pathlib
+import platform
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import zipfile
+from collections import defaultdict
+from urllib.parse import urljoin, urlparse
+
+# Third-party libraries
+import aiohttp
+import requests
+from playwright.async_api import async_playwright
+from playwright_stealth import Stealth
+from rich.align import Align
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn
+from rich.table import Table
+
 
 
 # ------------ CONSTANTS ------------
@@ -79,7 +82,7 @@ BASE_URLS = [
     "https://scans.lastation.us/manga/",
     "https://official.lowee.us/manga/",
     "https://hot.planeptune.us/manga/",
-    "https://scans-hot.planeptune.us/manga",
+    "https://scans-hot.planeptune.us/manga/",
 ]
 
 API_ENDPOINT = "https://api.mangadex.org"
@@ -144,12 +147,13 @@ async def url_exists(url: str) -> bool:
     try:
         async with aiohttp.ClientSession() as session:
             async with session.head(
-                url, allow_redirects=True, timeout=aiohttp.ClientTimeout(total=5)
+                url,
+                allow_redirects=True,
+                timeout=aiohttp.ClientTimeout(total=5),
             ) as response:
                 return response.status == 200
     except Exception:
         return False
-
 
 # ------------------ RATE LIMITER ------------------
 class RateLimiter:
