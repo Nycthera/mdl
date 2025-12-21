@@ -35,7 +35,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-
+version = "3.0 stable"
 
 # ------------------ CONFIG PATH ------------------
 def get_config_path():
@@ -830,6 +830,7 @@ def parse_args():
         "--md-lang", default=None, help="Language code for MangaDex download"
     )
     parser.add_argument("--update", action="store_true", help="Update the application")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version.format()}")
     return parser.parse_args()
 
 
