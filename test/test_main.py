@@ -12,6 +12,7 @@ import main  # your main.py
 
 # ---------- CONFIG TESTS ----------
 
+
 def test_create_default_config(tmp_path: Path, monkeypatch):
     cfg_path = tmp_path / "config.json"
     monkeypatch.setattr(main, "CONFIG_FILE", cfg_path)
@@ -35,6 +36,7 @@ def test_load_config_creates_default(tmp_path: Path, monkeypatch):
 
 # ---------- SANITIZATION ----------
 
+
 def test_sanitize_folder_name_removes_illegal():
     name = 'Manga:Name<>?*/"'
     cleaned = main.sanitize_folder_name(name)
@@ -46,6 +48,7 @@ def test_sanitize_folder_name_removes_illegal():
 
 # ---------- URL HANDLING ----------
 
+
 def test_extract_manga_name_from_url():
     url = "https://weebcentral.com/manga/one-piece/001.png"
     assert main.extract_manga_name_from_url(url) == "one piece"
@@ -56,9 +59,7 @@ def test_get_slug_and_pretty():
     assert slug == "My-Hero-Academia"
     assert pretty == "My Hero Academia"
 
-    slug2, pretty2 = main.get_slug_and_pretty(
-        "https://site.com/manga/naruto/"
-    )
+    slug2, pretty2 = main.get_slug_and_pretty("https://site.com/manga/naruto/")
     assert "naruto" in slug2.lower()
     assert "naruto" in pretty2.lower()
 
@@ -70,6 +71,7 @@ def test_get_slug_and_pretty_collapses_spaces():
 
 
 # ---------- CBZ CREATION ----------
+
 
 def test_create_cbz_for_all(tmp_path: Path):
     manga_folder = tmp_path / "One Piece"
@@ -99,6 +101,7 @@ def test_create_cbz_skips_when_no_files(tmp_path: Path):
 
 # ---------- SAFE DELETE ----------
 
+
 def test_safe_delete_folder(tmp_path: Path):
     file = tmp_path / "dummy.txt"
     file.write_text("abc", encoding="utf-8")
@@ -110,15 +113,10 @@ def test_safe_delete_folder(tmp_path: Path):
 
 # ---------- MANGADEX ----------
 
+
 def test_extract_manga_uuid_valid():
-    url = (
-        "https://mangadex.org/title/"
-        "123e4567-e89b-12d3-a456-426614174000/foobar"
-    )
-    assert (
-        main.extract_manga_uuid(url)
-        == "123e4567-e89b-12d3-a456-426614174000"
-    )
+    url = "https://mangadex.org/title/123e4567-e89b-12d3-a456-426614174000/foobar"
+    assert main.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
 
 
 def test_extract_manga_uuid_invalid():
@@ -137,6 +135,7 @@ async def test_get_manga_name_from_md_fallback(monkeypatch):
 
 
 # ---------- DOWNLOAD ERROR HANDLING ----------
+
 
 @pytest.mark.asyncio
 async def test_download_image_http_error(monkeypatch, tmp_path: Path):
@@ -170,9 +169,7 @@ async def test_download_image_http_error(monkeypatch, tmp_path: Path):
         async def __aexit__(self, *args):
             pass
 
-    monkeypatch.setattr(
-        aiohttp, "ClientSession", lambda *a, **k: DummySession()
-    )
+    monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **k: DummySession())
 
     msg = await main.download_image(
         "http://example.com/x.png",
