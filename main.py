@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 # Standard library
 import argparse
 import asyncio
@@ -24,7 +25,7 @@ from playwright_stealth import Stealth
 from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn
+from rich.progress import BarColumn, Progress, TextColumn, SpinnerColumn, TimeElapsedColumn, TimeRemainingColumn
 from rich.table import Table
 
 
@@ -50,7 +51,27 @@ def get_config_path():
 CONFIG_FILE = get_config_path()
 stop_signal = False
 console = Console()
+CLEAN_OUTPUT = False
 
+
+def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | None = None):
+    """Print a single boxed summary for clean-output mode."""
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+
+    table.add_row("Title", title)
+    table.add_row("Chapters", str(chapters))
+    table.add_row("Pages", str(pages))
+    if cbz_path:
+        table.add_row("CBZ", cbz_path)
+
+    console.print(
+        Panel(
+            Align.center(table),
+            border_style="cyan",
+            title="[white on cyan] Summary [/]")
+    )
 
 # ------------------ SIGNAL HANDLER ------------------
 def signal_handler(sig, frame):
@@ -105,6 +126,7 @@ def create_default_config():
         "max_pages": 50,
         "workers": 10,
         "cbz": True,
+        "clean_output": False,
         "md_language": "en",
     }
     with open(CONFIG_FILE, "w") as f:
@@ -222,10 +244,11 @@ def create_cbz_for_all(folder_path):
 
     # --- Defensive checks: folder must exist and have files to archive ---
     if not os.path.isdir(base_folder):
-        console.print(
-            f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]"
-        )
-        return
+        if not CLEAN_OUTPUT:
+            console.print(
+                f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]"
+            )
+        return None
 
     # ensure there's at least one file (excluding existing .cbz) to archive
     has_files = False
@@ -238,16 +261,18 @@ def create_cbz_for_all(folder_path):
             break
 
     if not has_files:
-        console.print(
-            f"[red]No files found in {base_folder}; skipping CBZ creation.[/]"
-        )
-        return
+        if not CLEAN_OUTPUT:
+            console.print(
+                f"[red]No files found in {base_folder}; skipping CBZ creation.[/]"
+            )
+        return None
 
     base_name = os.path.basename(base_folder)
     safe_base_name = sanitize_folder_name(base_name)
     # Place the CBZ inside the manga root folder
     cbz_name = os.path.join(base_folder, f"{safe_base_name}.cbz")
-    console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
+    if not CLEAN_OUTPUT:
+        console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
 
     # Now safe to create the CBZ (parent dir exists)
     with zipfile.ZipFile(cbz_name, "w") as cbz:
@@ -261,7 +286,8 @@ def create_cbz_for_all(folder_path):
                 arcname = os.path.relpath(file_path, base_folder)
                 cbz.write(file_path, arcname=arcname)
 
-    console.print(f"[magenta]Created {cbz_name}[/]")
+    if not CLEAN_OUTPUT:
+        console.print(f"[magenta]Created {cbz_name}[/]")
 
     # Delete only subfolders (per chapter folders) inside the manga root folder
     for item in os.listdir(base_folder):
@@ -272,9 +298,13 @@ def create_cbz_for_all(folder_path):
         if os.path.isdir(item_path):
             try:
                 shutil.rmtree(item_path)
-                console.print(f"[green]Deleted folder {item_path}[/]")
+                if not CLEAN_OUTPUT:
+                    console.print(f"[green]Deleted folder {item_path}[/]")
             except Exception as e:
-                console.print(f"[red]Failed to delete {item_path}: {e}[/]")
+                if not CLEAN_OUTPUT:
+                    console.print(f"[red]Failed to delete {item_path}: {e}[/]")
+
+    return cbz_name
 
 
 # ----------- sanitize manga name -----------
@@ -319,7 +349,8 @@ async def gather_all_urls(
 ):
     urls_to_download = []
     folder_base = sanitize_folder_name(manga_name)
-    console.print(f"[yellow]Gathering pages for {manga_name}...[/]")
+    if not CLEAN_OUTPUT:
+        console.print(f"[yellow]Gathering pages for {manga_name}...[/]")
 
     chapter = start_chapter
     while True:
@@ -343,20 +374,39 @@ async def gather_all_urls(
             ]
             pages_found = 0
 
-            with Progress(
-                TextColumn(f"[bold yellow]Checking Chapter {chapter_str}[/]"),
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.1f}%",
-                console=console,
-            ) as progress:
-                task = progress.add_task("Checking", total=len(urls))
-                results = await asyncio.gather(*[url_exists(url) for url in urls])
-                for url, exists in zip(urls, results):
-                    progress.update(task, advance=1)
+            # bounded concurrency for smoother progress
+            sem = asyncio.Semaphore(max(1, workers))
+            async def check_one(u):
+                async with sem:
+                    return u, await url_exists(u)
+
+            tasks = [asyncio.create_task(check_one(u)) for u in urls]
+
+            if not CLEAN_OUTPUT:
+                with Progress(
+                    SpinnerColumn(style="yellow"),
+                    TextColumn(f"[bold yellow]Checking Chapter {chapter_str}[/]"),
+                    BarColumn(),
+                    "[progress.percentage]{task.percentage:>3.1f}%",
+                    TimeElapsedColumn(),
+                    console=console,
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task("Checking", total=len(urls))
+                    for coro in asyncio.as_completed(tasks):
+                        url, exists = await coro
+                        progress.update(task, advance=1)
+                        if exists:
+                            urls_to_download.append((url, chapter_folder))
+                            pages_found += 1
+            else:
+                for coro in asyncio.as_completed(tasks):
+                    url, exists = await coro
                     if exists:
                         urls_to_download.append((url, chapter_folder))
                         pages_found += 1
-            console.print(f"[green]Chapter {chapter_str}: {pages_found} pages found[/]")
+            if not CLEAN_OUTPUT:
+                console.print(f"[green]Chapter {chapter_str}: {pages_found} pages found[/]")
 
         else:
             decimal_found_any = False
@@ -378,29 +428,47 @@ async def gather_all_urls(
                     ]
                     pages_found = 0
 
-                    with Progress(
-                        TextColumn(
-                            f"[bold yellow]Checking Chapter {chapter_decimal_str}[/]"
-                        ),
-                        BarColumn(),
-                        "[progress.percentage]{task.percentage:>3.1f}%",
-                        console=console,
-                    ) as progress:
-                        task = progress.add_task("Checking", total=len(urls))
-                        results = await asyncio.gather(
-                            *[url_exists(url) for url in urls]
-                        )
-                        for url, exists in zip(urls, results):
-                            progress.update(task, advance=1)
+                    # bounded concurrency for decimal chapter
+                    sem = asyncio.Semaphore(max(1, workers))
+                    async def check_one(u):
+                        async with sem:
+                            return u, await url_exists(u)
+
+                    tasks = [asyncio.create_task(check_one(u)) for u in urls]
+
+                    if not CLEAN_OUTPUT:
+                        with Progress(
+                            SpinnerColumn(style="yellow"),
+                            TextColumn(
+                                f"[bold yellow]Checking Chapter {chapter_decimal_str}[/]"
+                            ),
+                            BarColumn(),
+                            "[progress.percentage]{task.percentage:>3.1f}%",
+                            TimeElapsedColumn(),
+                            console=console,
+                            transient=True,
+                        ) as progress:
+                            task = progress.add_task("Checking", total=len(urls))
+                            for coro in asyncio.as_completed(tasks):
+                                url, exists = await coro
+                                progress.update(task, advance=1)
+                                if exists:
+                                    urls_to_download.append((url, chapter_folder))
+                                    pages_found += 1
+                    else:
+                        for coro in asyncio.as_completed(tasks):
+                            url, exists = await coro
                             if exists:
                                 urls_to_download.append((url, chapter_folder))
                                 pages_found += 1
-                    console.print(
-                        f"[green]Chapter {chapter_decimal_str}: {pages_found} pages found[/]"
-                    )
+                    if not CLEAN_OUTPUT:
+                        console.print(
+                            f"[green]Chapter {chapter_decimal_str}: {pages_found} pages found[/]"
+                        )
 
             if not decimal_found_any:
-                console.print(f"[red]Chapter {chapter_str} not found. Stopping.[/]")
+                if not CLEAN_OUTPUT:
+                    console.print(f"[red]Chapter {chapter_str} not found. Stopping.[/]")
                 break
 
         chapter += 1
@@ -418,29 +486,43 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
     for _, folder in urls_to_download:
         os.makedirs(folder, exist_ok=True)
 
-    with Progress(
-        TextColumn("[bold green]Downloading[/]"),
-        BarColumn(),
-        "[progress.percentage]{task.percentage:>3.1f}%",
-        "•",
-        TextColumn("{task.fields[pages_per_sec]} pages/sec"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
+    if not CLEAN_OUTPUT:
+        with Progress(
+            SpinnerColumn(style="green"),
+            TextColumn("[bold green]Downloading[/]"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.1f}%",
+            "•",
+            TextColumn("{task.fields[pages_per_sec]} pages/sec"),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
 
+            async def download_worker(args):
+                url, folder = args
+                return await download_image(url, folder)
+
+            tasks = [download_worker(item) for item in urls_to_download]
+            for idx, result in enumerate(await asyncio.gather(*tasks), 1):
+                if stop_signal:
+                    break
+                elapsed = max(time.time() - start_time, 0.001)
+                pps = idx / elapsed
+                progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
+                if ("Failed" in result or "HTTP" in result) and not CLEAN_OUTPUT:
+                    console.print(result)
+    else:
         async def download_worker(args):
             url, folder = args
             return await download_image(url, folder)
 
         tasks = [download_worker(item) for item in urls_to_download]
-        for idx, result in enumerate(await asyncio.gather(*tasks), 1):
+        for _ in await asyncio.gather(*tasks):
             if stop_signal:
                 break
-            elapsed = max(time.time() - start_time, 0.001)
-            pps = idx / elapsed
-            progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
-            if "Failed" in result or "HTTP" in result:
-                console.print(result)
 
 
 # ------------------ MANGADEX FUNCTIONS ------------------
@@ -533,9 +615,14 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
     manga_root_folder = manga_name_clean
     os.makedirs(manga_root_folder, exist_ok=True)
 
-    console.print(f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]")
+    if not CLEAN_OUTPUT:
+        console.print(f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]")
     chapters = await fetch_all_chapters_md(manga_uuid, lang)
-    console.print(f"[green]Found {len(chapters)} chapters[/]")
+    if not CLEAN_OUTPUT:
+        console.print(f"[green]Found {len(chapters)} chapters[/]")
+
+    total_pages_downloaded = 0
+    total_chapters_downloaded = 0
 
     for chapter in chapters:
         attr = chapter.get("attributes", {})
@@ -550,25 +637,41 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
 
         images = await get_images_md(chap_id, use_saver=use_saver)
         if not images:
-            console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
+            if not CLEAN_OUTPUT:
+                console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
             continue
 
         os.makedirs(chapter_folder, exist_ok=True)
-        console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
+        if not CLEAN_OUTPUT:
+            console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
 
         urls_to_download = [(url, chapter_folder) for url in images]
         await download_all_pages(
             urls_to_download, max_workers=10, manga_name=manga_name_clean
         )
 
+        total_pages_downloaded += len(images)
+        total_chapters_downloaded += 1
+
         if not os.listdir(chapter_folder):
-            console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
+            if not CLEAN_OUTPUT:
+                console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
             os.rmdir(chapter_folder)
 
     # Create CBZ from the manga root folder
+    cbz_path = None
     if create_cbz:
-        create_cbz_for_all(manga_root_folder)
+        cbz_path = create_cbz_for_all(manga_root_folder)
 
+    # Summary output for clean mode
+    if CLEAN_OUTPUT:
+        msg = (
+            f"Downloaded '{manga_name_clean}' (lang={lang}): "
+            f"chapters={total_chapters_downloaded}, pages={total_pages_downloaded}"
+        )
+        if cbz_path:
+            msg += f", cbz='{cbz_path}'"
+        print(msg)
 
 async def get_manga_name_from_md(manga_url, lang="en"):
     manga_uuid = extract_manga_uuid(manga_url)
@@ -591,31 +694,36 @@ async def get_manga_name_from_md(manga_url, lang="en"):
 
 # Literal method to get from the manga link, instead of image URL
 async def check_url_weebcentral(url):
-    console.print(
-        Panel.fit(
-            f"[bold magenta]WeebCentral ✨[/bold magenta]\n[yellow]{url}[/]",
-            title="[white on magenta] Weeb Mode [/]",
-            border_style="magenta",
+    if not CLEAN_OUTPUT:
+        console.print(
+            Panel.fit(
+                f"[bold magenta]WeebCentral ✨[/bold magenta]\n[yellow]{url}[/]",
+                title="[white on magenta] Weeb Mode [/]",
+                border_style="magenta",
+            )
         )
-    )
 
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
-        console.print("[cyan] Loading page... please wait...[/]")
+        if not CLEAN_OUTPUT:
+            console.print("[cyan] Loading page... please wait...[/]")
         try:
             response = await page.goto(url, wait_until="load", timeout=45000)
             if not response or response.status != 200:
-                console.print(
-                    f"[red] Failed to load page (status {response.status if response else 0})[/]"
-                )
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[red] Failed to load page (status {response.status if response else 0})[/]"
+                    )
                 return [], "Unknown_Title"
         except Exception as e:
-            console.print(f"[red] Page load warning: {e}[/]")
+            if not CLEAN_OUTPUT:
+                console.print(f"[red] Page load warning: {e}[/]")
             return [], "Unknown_Title"
 
-        console.print("[yellow] Scrolling for lazy-loaded images...[/]")
+        if not CLEAN_OUTPUT:
+            console.print("[yellow] Scrolling for lazy-loaded images...[/]")
         for _ in range(20):
             await page.mouse.wheel(0, 1200)
             await asyncio.sleep(0.7)
@@ -639,26 +747,27 @@ async def check_url_weebcentral(url):
 
         await browser.close()
 
-        # --- Fancy summary table ---
-        table = Table(
-            title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
-        )
-        table.add_column("Field", style="cyan", no_wrap=True)
-        table.add_column("Value", style="white")
-
-        table.add_row("Title", f"[bold white]{title}[/]")
-        table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
-        table.add_row(
-            "Status",
-            "[bold green]Success[/]" if img_urls else "[bold red]No images found[/]",
-        )
-
-        console.print()
-        console.print(
-            Panel(
-                Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"
+        if not CLEAN_OUTPUT:
+            # --- Fancy summary table ---
+            table = Table(
+                title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
             )
-        )
+            table.add_column("Field", style="cyan", no_wrap=True)
+            table.add_column("Value", style="white")
+
+            table.add_row("Title", f"[bold white]{title}[/]")
+            table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
+            table.add_row(
+                "Status",
+                "[bold green]Success[/]" if img_urls else "[bold red]No images found[/]",
+            )
+
+            console.print()
+            console.print(
+                Panel(
+                    Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"
+                )
+            )
 
         return img_urls, title
 
@@ -832,6 +941,11 @@ def parse_args():
     parser.add_argument("--workers", type=int)
     parser.add_argument("--cbz", action="store_true")
     parser.add_argument(
+        "--clean-output",
+        action="store_true",
+        help="Minimal output: no banner, no progress bars",
+    )
+    parser.add_argument(
         "--md-lang", default=None, help="Language code for MangaDex download"
     )
     parser.add_argument("--update", action="store_true", help="Update the application")
@@ -854,6 +968,11 @@ async def main():
     cbz_flag = args.cbz or config.get("cbz", True)
     md_lang = args.md_lang or config.get("md_language", "en")
     update_flag = args.update or config.get("update", False)
+    clean_flag = args.clean_output or config.get("clean_output", False)
+
+    # configure output mode (do not disable colors; just trim output)
+    global CLEAN_OUTPUT
+    CLEAN_OUTPUT = bool(clean_flag)
 
     if update_flag:
         update()
@@ -871,11 +990,12 @@ async def main():
 
     # ---- WeebCentral explicit URL case ----
     if manga_name.lower().startswith("http") and "weebcentral" in manga_name.lower():
-        console.print(
-            Panel.fit(
-                "[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"
+        if not CLEAN_OUTPUT:
+            console.print(
+                Panel.fit(
+                    "[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"
+                )
             )
-        )
         img_urls, title = await check_url_weebcentral(manga_name)
         pretty_name = sanitize_folder_name(title)
 
@@ -883,9 +1003,10 @@ async def main():
             console.print("[red]No images detected, exiting WeebCentral mode.[/]")
             sys.exit(1)
 
-        console.print(
-            f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
-        )
+        if not CLEAN_OUTPUT:
+            console.print(
+                f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
+            )
         slug, pretty_name = get_slug_and_pretty(title)
         urls_to_download = await gather_all_urls(
             slug,
@@ -904,16 +1025,23 @@ async def main():
             urls_to_download, max_workers=workers, manga_name=pretty_name
         )
 
+        cbz_created_path = None
         if cbz_flag and not stop_signal:
             # only create CBZ if folder exists and has non-cbz files
             if os.path.isdir(pretty_name) and any(
                 f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
             ):
-                create_cbz_for_all(pretty_name)
+                cbz_created_path = create_cbz_for_all(pretty_name)
             else:
-                console.print(
-                    f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
-                )
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
+                    )
+        # summary output when clean mode
+        if CLEAN_OUTPUT:
+            total_pages = len(urls_to_download)
+            total_chapters = len({folder for _, folder in urls_to_download})
+            print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
         return
 
     # ---- Regular direct image source case (slug or plain name) ----
@@ -930,7 +1058,8 @@ async def main():
     )
 
     if not urls_to_download:
-        console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
+        if not CLEAN_OUTPUT:
+            console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
         return
 
     await download_all_pages(
@@ -938,20 +1067,30 @@ async def main():
     )
 
     # ---- CBZ packaging ----
+    cbz_created_path = None
     if cbz_flag and not stop_signal:
         if os.path.isdir(pretty_name) and any(
             f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
         ):
-            create_cbz_for_all(pretty_name)
+            cbz_created_path = create_cbz_for_all(pretty_name)
         else:
-            console.print(
-                f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
-            )
+            if not CLEAN_OUTPUT:
+                console.print(
+                    f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
+                )
+
+    # summary output when clean mode
+    if CLEAN_OUTPUT:
+        total_pages = len(urls_to_download)
+        total_chapters = len({folder for _, folder in urls_to_download})
+        print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
 
 
 if __name__ == "__main__":
-    print(
-        """
+    # Skip banner when clean output requested via CLI
+    if "--clean-output" not in sys.argv:
+        print(
+            """
 \033[96m          
  _ __ ___   __ _ _ __   __ _  __ _                       
 | '_ ` _ \\ / _` | '_ \\ / _` |/ _` |                      
@@ -964,5 +1103,5 @@ if __name__ == "__main__":
  \\__,_|\\___| \\_/\\_/ |_| |_|_|\\___/ \\__,_|\\__,_|
 \033[0m
 """
-    )
+        )
     asyncio.run(main())
