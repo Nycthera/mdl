@@ -1,25 +1,13 @@
-name: Python Tests & Optional Release
+name: Python Tests & Auto Release
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      create_release:
-        description: "Do you want to create a release for the latest commit?"
-        required: true
-        default: "no"
-        type: choice
-        options:
-          - yes
-          - no
+    tags:
+      - "v*" # Trigger on version tags, e.g., v1.0.0
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         python-version: [3.13]
@@ -44,32 +32,72 @@ jobs:
         run: |
           PYTHONPATH=. pytest -v
 
-      - name: Install system dependencies
-        run: |
-          sudo apt update
-          sudo apt install neofetch -y
-
-      - name: Fun step
-        run: |
-          echo " --- IGNORE --- "
-          neofetch
-          echo " --- IGNORE --- "
-
-  release:
-    if: ${{ github.event.inputs.create_release == 'yes' }}
-    runs-on: ubuntu-latest
+  build:
     needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Create GitHub Release
-        uses: actions/create-release@v1
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          tag_name: v${{ github.run_number }}
-          release_name: Release ${{ github.run_number }}
-          body: "Automated release from workflow_dispatch"
-          draft: false
-          prerelease: false
+          python-version: 3.13
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: |
+          pyinstaller --onefile main.py --name mdl
+
+      - name: Rename artifact (OS specific)
+        shell: bash
+        run: |
+          mkdir dist-release
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            mv dist/mdl.exe dist-release/mdl-windows.exe
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            mv dist/mdl dist-release/mdl-macos
+          else
+            mv dist/mdl dist-release/mdl-linux
+          fi
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdl-${{ runner.os }}
+          path: dist-release/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          body: |
+            Automated release for tag `${{ github.ref_name }}`
+
+            ## Changes
+            - ✅ Run tests
+            - ✅ Build multi-platform executables
+            - ✅ Package ready for download
+
+          files: artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
