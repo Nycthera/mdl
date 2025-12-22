@@ -109,6 +109,15 @@ python main.py -M "https://mangadx.org/title/uuid/manga-name"
 python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
 ```
 
+#### Clean Output Mode
+
+```bash
+# Minimal output: no banner or progress bars
+python main.py -M "naruto" --clean-output
+```
+
+This mode suppresses progress bars and prints a compact summary panel (title, chapters, pages, CBZ path if created) at the end.
+
 #### API Server
 
 ```bash
