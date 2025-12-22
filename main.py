@@ -38,7 +38,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-version = "3.0 stable"
+version = "3.1 stable"
 
 
 # ------------------ CONFIG PATH ------------------
