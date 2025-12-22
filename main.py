@@ -376,6 +376,7 @@ async def gather_all_urls(
 
             # bounded concurrency for smoother progress
             sem = asyncio.Semaphore(max(1, workers))
+
             async def check_one(u):
                 async with sem:
                     return u, await url_exists(u)
@@ -430,6 +431,7 @@ async def gather_all_urls(
 
                     # bounded concurrency for decimal chapter
                     sem = asyncio.Semaphore(max(1, workers))
+
                     async def check_one(u):
                         async with sem:
                             return u, await url_exists(u)
