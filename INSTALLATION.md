@@ -76,6 +76,14 @@ python main.py -M "https://mangadx.org/title/uuid/manga-name"
 python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
 ```
 
+### Clean Output Mode (summary only)
+
+```bash
+python main.py --clean-output -M "naruto"
+```
+
+This suppresses progress bars and prints a compact summary panel at the end.
+
 ### API Testing
 
 ```bash
@@ -98,6 +106,7 @@ The application creates a config file at `~/.config/manga_downloader/config.json
   "max_pages": 50,
   "workers": 10,
   "cbz": true,
+  "clean_output": false,
   "md_language": "en"
 }
 ```

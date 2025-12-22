@@ -28,7 +28,7 @@ mdl/
 
 ### Core Application
 
-- **`main.py`** - 918-line Python CLI with multi-threading, progress tracking, and dual-source support
+- **`main.py`** - Python CLI with bounded async concurrency, smooth Rich progress bars, and a clean-output summary panel
 - **`test_main.py`** - Comprehensive pytest suite with mocking and edge case testing
 
 ### API Server

@@ -8,9 +8,10 @@ MDL implements a dual-architecture approach combining a Python CLI application w
 
 ### Python CLI Application (`main.py`)
 
-- **Concurrency Model**: asyncio with aiohttp for non-blocking, high-concurrency downloads
+- **Concurrency Model**: asyncio with aiohttp for non-blocking, high-concurrency downloads (bounded by semaphores for smoother progress updates)
 - **Data Sources**: Multi-source approach with automatic failover across manga hosting services
-- **Progress Tracking**: Real-time metrics with Rich library integration and async-compatible updates
+- **Progress Tracking**: Rich progress bars powered by `asyncio.as_completed` for incremental updates (spinner + elapsed/remaining)
+- **Clean Output Mode**: Suppresses progress bars and prints a compact summary panel (title/chapters/pages/CBZ)
 - **Error Handling**: RateLimiter class with exponential backoff and async timeout management
 - **Configuration**: JSON-based user configuration management with graceful signal handling
 
@@ -32,7 +33,7 @@ MDL implements a dual-architecture approach combining a Python CLI application w
 ## Performance Optimizations
 
 - **Async HTTP Pooling**: aiohttp ClientSession for connection reuse and reduced overhead
-- **Concurrent Task Batching**: asyncio.gather() for parallel URL validation and downloads without thread context switching
+- **Concurrent Task Batching**: `asyncio.as_completed` + semaphores for smooth, incremental progress while keeping concurrency bounded
 - **Memory Management**: Async streaming downloads with incremental file writes to prevent memory exhaustion
 - **Progress Visualization**: Non-blocking Rich progress bars with async task updates and real-time metrics
 
