@@ -45,7 +45,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-version = "3.1 stable"
+SOFTWARE_VERSION = "3.2 stable"
 
 
 # ------------------ CONFIG PATH ------------------
@@ -978,7 +978,7 @@ def parse_args():
     )
     parser.add_argument("--update", action="store_true", help="Update the application")
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {version.format()}"
+        "--version", action="version", version=f"%(prog)s {SOFTWARE_VERSION}"
     )
     return parser.parse_args()
 
