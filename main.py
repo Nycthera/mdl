@@ -10,6 +10,7 @@ import platform
 import re
 import shutil
 import signal
+import ssl
 import subprocess
 import sys
 import time
@@ -45,7 +46,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-version = "3.1 stable"
+version = "3.2table"
 
 
 # ------------------ CONFIG PATH ------------------
@@ -178,7 +179,11 @@ def extract_manga_name_from_url(manga_input):
 
 async def url_exists(url: str) -> bool:
     try:
-        connector = aiohttp.TCPConnector(ssl=False)
+        # Create SSL context that doesn't verify certificates but maintains encryption
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.head(
                 url,
@@ -232,7 +237,11 @@ async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 
     for attempt in range(1, max_retries + 1):
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
+            # Create SSL context that doesn't verify certificates but maintains encryption
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
                     url, timeout=aiohttp.ClientTimeout(total=15)
