@@ -25,7 +25,14 @@ from playwright_stealth import Stealth
 from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn, SpinnerColumn, TimeElapsedColumn, TimeRemainingColumn
+from rich.progress import (
+    BarColumn,
+    Progress,
+    TextColumn,
+    SpinnerColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
 from rich.table import Table
 
 
@@ -54,7 +61,9 @@ console = Console()
 CLEAN_OUTPUT = False
 
 
-def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | None = None):
+def print_clean_summary(
+    title: str, chapters: int, pages: int, cbz_path: str | None = None
+):
     """Print a single boxed summary for clean-output mode."""
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Field", style="cyan", no_wrap=True)
@@ -70,8 +79,10 @@ def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | N
         Panel(
             Align.center(table),
             border_style="cyan",
-            title="[white on cyan] Summary [/]")
+            title="[white on cyan] Summary [/]",
+        )
     )
+
 
 # ------------------ SIGNAL HANDLER ------------------
 def signal_handler(sig, frame):
@@ -167,7 +178,8 @@ def extract_manga_name_from_url(manga_input):
 
 async def url_exists(url: str) -> bool:
     try:
-        async with aiohttp.ClientSession() as session:
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
             async with session.head(
                 url,
                 allow_redirects=True,
@@ -220,7 +232,8 @@ async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 
     for attempt in range(1, max_retries + 1):
         try:
-            async with aiohttp.ClientSession() as session:
+            connector = aiohttp.TCPConnector(ssl=False)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
                     url, timeout=aiohttp.ClientTimeout(total=15)
                 ) as r:
@@ -407,7 +420,9 @@ async def gather_all_urls(
                         urls_to_download.append((url, chapter_folder))
                         pages_found += 1
             if not CLEAN_OUTPUT:
-                console.print(f"[green]Chapter {chapter_str}: {pages_found} pages found[/]")
+                console.print(
+                    f"[green]Chapter {chapter_str}: {pages_found} pages found[/]"
+                )
 
         else:
             decimal_found_any = False
@@ -501,7 +516,9 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
             console=console,
             transient=True,
         ) as progress:
-            task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
+            task = progress.add_task(
+                "Downloading", total=total_pages, pages_per_sec="0.0"
+            )
 
             async def download_worker(args):
                 url, folder = args
@@ -517,6 +534,7 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
                 if ("Failed" in result or "HTTP" in result) and not CLEAN_OUTPUT:
                     console.print(result)
     else:
+
         async def download_worker(args):
             url, folder = args
             return await download_image(url, folder)
@@ -645,7 +663,9 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
 
         os.makedirs(chapter_folder, exist_ok=True)
         if not CLEAN_OUTPUT:
-            console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
+            console.print(
+                f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]"
+            )
 
         urls_to_download = [(url, chapter_folder) for url in images]
         await download_all_pages(
@@ -674,6 +694,7 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
         if cbz_path:
             msg += f", cbz='{cbz_path}'"
         print(msg)
+
 
 async def get_manga_name_from_md(manga_url, lang="en"):
     manga_uuid = extract_manga_uuid(manga_url)
@@ -706,7 +727,8 @@ async def check_url_weebcentral(url):
         )
 
     async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True, channel="chromium")
+
         page = await browser.new_page()
 
         if not CLEAN_OUTPUT:
@@ -761,13 +783,17 @@ async def check_url_weebcentral(url):
             table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
             table.add_row(
                 "Status",
-                "[bold green]Success[/]" if img_urls else "[bold red]No images found[/]",
+                "[bold green]Success[/]"
+                if img_urls
+                else "[bold red]No images found[/]",
             )
 
             console.print()
             console.print(
                 Panel(
-                    Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"
+                    Align.center(table),
+                    border_style="magenta",
+                    title="✨ Scan Complete ✨",
                 )
             )
 
@@ -995,7 +1021,8 @@ async def main():
         if not CLEAN_OUTPUT:
             console.print(
                 Panel.fit(
-                    "[bold magenta] Entering WeebCentral Mode [/]", border_style="magenta"
+                    "[bold magenta] Entering WeebCentral Mode [/]",
+                    border_style="magenta",
                 )
             )
         img_urls, title = await check_url_weebcentral(manga_name)
@@ -1010,9 +1037,11 @@ async def main():
                 f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
             )
         slug, pretty_name = get_slug_and_pretty(title)
+        
+        # For WeebCentral, use gather_all_urls starting from chapter 1 to find all chapters
         urls_to_download = await gather_all_urls(
             slug,
-            start_chapter=start_chapter,
+            start_chapter=1,
             start_page=start_page,
             max_pages=max_pages,
             max_decimals=50,
@@ -1020,7 +1049,7 @@ async def main():
         )
         if not urls_to_download:
             console.print(
-                f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]"
+                f"[yellow]No pages found for '{manga_name}'.[/]"
             )
 
         await download_all_pages(
@@ -1043,7 +1072,9 @@ async def main():
         if CLEAN_OUTPUT:
             total_pages = len(urls_to_download)
             total_chapters = len({folder for _, folder in urls_to_download})
-            print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
+            print_clean_summary(
+                pretty_name, total_chapters, total_pages, cbz_created_path
+            )
         return
 
     # ---- Regular direct image source case (slug or plain name) ----
@@ -1061,7 +1092,9 @@ async def main():
 
     if not urls_to_download:
         if not CLEAN_OUTPUT:
-            console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
+            console.print(
+                f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]"
+            )
         return
 
     await download_all_pages(
