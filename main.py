@@ -46,7 +46,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-version = "3.2table"
+version = "3.2 stable"
 
 
 # ------------------ CONFIG PATH ------------------
@@ -154,6 +154,11 @@ def load_config():
 
 
 # ------------------ HELPERS ------------------
+def create_ssl_context():
+    """Create SSL context with default verification settings for secure HTTPS connections."""
+    return ssl.create_default_context()
+
+
 def validate_manga_input(manga_name):
     if not manga_name:
         cprint(
@@ -179,10 +184,8 @@ def extract_manga_name_from_url(manga_input):
 
 async def url_exists(url: str) -> bool:
     try:
-        # Create SSL context that doesn't verify certificates but maintains encryption
-        ssl_context = ssl.create_default_context()
-        ssl_context.check_hostname = False
-        ssl_context.verify_mode = ssl.CERT_NONE
+        # Use default SSL verification for secure HTTPS connections
+        ssl_context = create_ssl_context()
         connector = aiohttp.TCPConnector(ssl=ssl_context)
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.head(
@@ -237,10 +240,8 @@ async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 
     for attempt in range(1, max_retries + 1):
         try:
-            # Create SSL context that doesn't verify certificates but maintains encryption
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
+            # Use default SSL verification for secure HTTPS connections
+            ssl_context = create_ssl_context()
             connector = aiohttp.TCPConnector(ssl=ssl_context)
             async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(
@@ -792,9 +793,11 @@ async def check_url_weebcentral(url):
             table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
             table.add_row(
                 "Status",
-                "[bold green]Success[/]"
-                if img_urls
-                else "[bold red]No images found[/]",
+                (
+                    "[bold green]Success[/]"
+                    if img_urls
+                    else "[bold red]No images found[/]"
+                ),
             )
 
             console.print()
@@ -1046,7 +1049,7 @@ async def main():
                 f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
             )
         slug, pretty_name = get_slug_and_pretty(title)
-        
+
         # For WeebCentral, use gather_all_urls starting from chapter 1 to find all chapters
         urls_to_download = await gather_all_urls(
             slug,
@@ -1057,9 +1060,7 @@ async def main():
             workers=workers,
         )
         if not urls_to_download:
-            console.print(
-                f"[yellow]No pages found for '{manga_name}'.[/]"
-            )
+            console.print(f"[yellow]No pages found for '{manga_name}'.[/]")
 
         await download_all_pages(
             urls_to_download, max_workers=workers, manga_name=pretty_name
