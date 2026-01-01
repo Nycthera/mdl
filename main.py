@@ -783,9 +783,11 @@ async def check_url_weebcentral(url):
             table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
             table.add_row(
                 "Status",
-                "[bold green]Success[/]"
-                if img_urls
-                else "[bold red]No images found[/]",
+                (
+                    "[bold green]Success[/]"
+                    if img_urls
+                    else "[bold red]No images found[/]"
+                ),
             )
 
             console.print()
@@ -1037,7 +1039,7 @@ async def main():
                 f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
             )
         slug, pretty_name = get_slug_and_pretty(title)
-        
+
         # For WeebCentral, use gather_all_urls starting from chapter 1 to find all chapters
         urls_to_download = await gather_all_urls(
             slug,
@@ -1048,9 +1050,7 @@ async def main():
             workers=workers,
         )
         if not urls_to_download:
-            console.print(
-                f"[yellow]No pages found for '{manga_name}'.[/]"
-            )
+            console.print(f"[yellow]No pages found for '{manga_name}'.[/]")
 
         await download_all_pages(
             urls_to_download, max_workers=workers, manga_name=pretty_name
