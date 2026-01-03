@@ -728,78 +728,79 @@ async def check_url_weebcentral(url):
 
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(headless=True, channel="chromium")
-
-        page = await browser.new_page()
-
-        if not CLEAN_OUTPUT:
-            console.print("[cyan] Loading page... please wait...[/]")
+        
         try:
-            response = await page.goto(url, wait_until="load", timeout=45000)
-            if not response or response.status != 200:
-                if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[red] Failed to load page (status {response.status if response else 0})[/]"
-                    )
-                return [], "Unknown_Title"
-        except Exception as e:
+            page = await browser.new_page()
+
             if not CLEAN_OUTPUT:
-                console.print(f"[red] Page load warning: {e}[/]")
-            return [], "Unknown_Title"
+                console.print("[cyan] Loading page... please wait...[/]")
+            try:
+                response = await page.goto(url, wait_until="load", timeout=45000)
+                if not response or response.status != 200:
+                    if not CLEAN_OUTPUT:
+                        console.print(
+                            f"[red] Failed to load page (status {response.status if response else 0})[/]"
+                        )
+                    return [], "Unknown_Title"
+            except Exception as e:
+                if not CLEAN_OUTPUT:
+                    console.print(f"[red] Page load warning: {e}[/]")
+                return [], "Unknown_Title"
 
-        if not CLEAN_OUTPUT:
-            console.print("[yellow] Scrolling for lazy-loaded images...[/]")
-        for _ in range(20):
-            await page.mouse.wheel(0, 1200)
-            await asyncio.sleep(0.7)
+            if not CLEAN_OUTPUT:
+                console.print("[yellow] Scrolling for lazy-loaded images...[/]")
+            for _ in range(20):
+                await page.mouse.wheel(0, 1200)
+                await asyncio.sleep(0.7)
 
-        await asyncio.sleep(4)
+            await asyncio.sleep(4)
 
-        img_elements = await page.query_selector_all("img")
-        img_urls = []
-        for img in img_elements:
-            src = await img.get_attribute("src")
-            if src and "/manga/" in src and src.endswith(".png"):
-                img_urls.append(urljoin(url, src))
+            img_elements = await page.query_selector_all("img")
+            img_urls = []
+            for img in img_elements:
+                src = await img.get_attribute("src")
+                if src and "/manga/" in src and src.endswith(".png"):
+                    img_urls.append(urljoin(url, src))
 
-        title_pattern = re.compile(r"/manga/([^/]+)/", re.IGNORECASE)
-        title = "Unknown_Title"
-        for u in img_urls:
-            match = title_pattern.search(u)
-            if match:
-                title = match.group(1)
-                break
+            title_pattern = re.compile(r"/manga/([^/]+)/", re.IGNORECASE)
+            title = "Unknown_Title"
+            for u in img_urls:
+                match = title_pattern.search(u)
+                if match:
+                    title = match.group(1)
+                    break
 
-        await browser.close()
-
-        if not CLEAN_OUTPUT:
-            # --- Fancy summary table ---
-            table = Table(
-                title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
-            )
-            table.add_column("Field", style="cyan", no_wrap=True)
-            table.add_column("Value", style="white")
-
-            table.add_row("Title", f"[bold white]{title}[/]")
-            table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
-            table.add_row(
-                "Status",
-                (
-                    "[bold green]Success[/]"
-                    if img_urls
-                    else "[bold red]No images found[/]"
-                ),
-            )
-
-            console.print()
-            console.print(
-                Panel(
-                    Align.center(table),
-                    border_style="magenta",
-                    title="✨ Scan Complete ✨",
+            if not CLEAN_OUTPUT:
+                # --- Fancy summary table ---
+                table = Table(
+                    title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
                 )
-            )
+                table.add_column("Field", style="cyan", no_wrap=True)
+                table.add_column("Value", style="white")
 
-        return img_urls, title
+                table.add_row("Title", f"[bold white]{title}[/]")
+                table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
+                table.add_row(
+                    "Status",
+                    (
+                        "[bold green]Success[/]"
+                        if img_urls
+                        else "[bold red]No images found[/]"
+                    ),
+                )
+
+                console.print()
+                console.print(
+                    Panel(
+                        Align.center(table),
+                        border_style="magenta",
+                        title="✨ Scan Complete ✨",
+                    )
+                )
+
+            return img_urls, title
+        finally:
+            await browser.close()
 
 
 def create_single_weebcentral_url(title):
