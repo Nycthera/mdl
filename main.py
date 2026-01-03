@@ -179,7 +179,7 @@ def extract_manga_name_from_url(manga_input):
 async def url_exists(url: str) -> bool:
     try:
         connector = aiohttp.TCPConnector(ssl=False)
-        async with aiohttp.ClientSession(connector=connector) as session:
+        async with aiohttp.ClientSession(connector=connector, connector_owner=True) as session:
             async with session.head(
                 url,
                 allow_redirects=True,
@@ -233,7 +233,7 @@ async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
     for attempt in range(1, max_retries + 1):
         try:
             connector = aiohttp.TCPConnector(ssl=False)
-            async with aiohttp.ClientSession(connector=connector) as session:
+            async with aiohttp.ClientSession(connector=connector, connector_owner=True) as session:
                 async with session.get(
                     url, timeout=aiohttp.ClientTimeout(total=15)
                 ) as r:
