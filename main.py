@@ -744,7 +744,7 @@ async def check_url_weebcentral(url):
                     return [], "Unknown_Title"
             except Exception as e:
                 if not CLEAN_OUTPUT:
-                    console.print(f"[red] Page load warning: {e}[/]")
+                    console.print(f"[red] Page load failed: {e}[/]")
                 return [], "Unknown_Title"
 
             if not CLEAN_OUTPUT:
