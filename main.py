@@ -45,7 +45,7 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/122.0.0.0 Safari/537.36"
 )
-SOFTWARE_VERSION = "3.2 stable"
+SOFTWARE_VERSION = "3.3 stable"
 
 
 # ------------------ CONFIG PATH ------------------
@@ -727,7 +727,10 @@ async def check_url_weebcentral(url):
         )
 
     async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.chromium.launch(headless=True, channel="chromium")
+        browser = await p.firefox.launch(
+            headless=True,
+            args=[]
+        )
 
         page = await browser.new_page()
 
