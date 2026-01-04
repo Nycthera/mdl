@@ -727,7 +727,7 @@ async def check_url_weebcentral(url):
         )
 
     async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.firefox.launch(
+        browser = await p.webkit.launch(
             headless=True,
             args=[]
         )
