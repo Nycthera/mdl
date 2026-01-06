@@ -727,10 +727,32 @@ async def check_url_weebcentral(url):
         )
 
     async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.webkit.launch(
-            headless=True,
-            args=[]
-        )
+        browser = None
+        browser_name = None
+
+        launch_order = [
+            ("webkit", p.webkit),
+            ("firefox", p.firefox),
+            ("chromium", p.chromium),
+        ]
+
+        for name, engine in launch_order:
+            try:
+                if not CLEAN_OUTPUT:
+                    console.print(f"[cyan]Trying {name} browser...[/]")
+
+                browser = await engine.launch(headless=True, args=[])
+                browser_name = name
+                break
+            except Exception as e:
+                if not CLEAN_OUTPUT:
+                    console.print(f"[yellow]{name} failed: {e}[/]")
+
+        if not browser:
+            raise RuntimeError("Failed to launch any Playwright browser")
+
+        if not CLEAN_OUTPUT:
+            console.print(f"[green]Using {browser_name} browser[/]")
 
         page = await browser.new_page()
 
