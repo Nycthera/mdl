@@ -178,7 +178,7 @@ def extract_manga_name_from_url(manga_input):
 
 async def url_exists(url: str) -> bool:
     try:
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.head(
                 url,
@@ -221,7 +221,13 @@ rate_limiter_athome = RateLimiter(max_calls=1, per_seconds=1.5)
 
 
 # ------------------ DOWNLOAD ------------------
-async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
+async def download_image(
+    url,
+    folder,
+    session: aiohttp.ClientSession,
+    max_retries=5,
+    backoff_factor=1.0,
+):
     if stop_signal:
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
     os.makedirs(folder, exist_ok=True)
@@ -232,15 +238,11 @@ async def download_image(url, folder, max_retries=5, backoff_factor=1.0):
 
     for attempt in range(1, max_retries + 1):
         try:
-            connector = aiohttp.TCPConnector(ssl=False)
-            async with aiohttp.ClientSession(connector=connector) as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=15)
-                ) as r:
-                    r.raise_for_status()
-                    content = await r.read()
-                    with open(filepath, "wb") as f:
-                        f.write(content)
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                r.raise_for_status()
+                content = await r.read()
+                with open(filepath, "wb") as f:
+                    f.write(content)
             return f"{Colors.GREEN}Saved as {filepath}{Colors.RESET}"
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             if attempt == max_retries:
@@ -503,46 +505,46 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
     for _, folder in urls_to_download:
         os.makedirs(folder, exist_ok=True)
 
-    if not CLEAN_OUTPUT:
-        with Progress(
-            SpinnerColumn(style="green"),
-            TextColumn("[bold green]Downloading[/]"),
-            BarColumn(),
-            "[progress.percentage]{task.percentage:>3.1f}%",
-            "•",
-            TextColumn("{task.fields[pages_per_sec]} pages/sec"),
-            TimeElapsedColumn(),
-            TimeRemainingColumn(),
-            console=console,
-            transient=True,
-        ) as progress:
-            task = progress.add_task(
-                "Downloading", total=total_pages, pages_per_sec="0.0"
-            )
-
-            async def download_worker(args):
-                url, folder = args
-                return await download_image(url, folder)
-
-            tasks = [download_worker(item) for item in urls_to_download]
-            for idx, result in enumerate(await asyncio.gather(*tasks), 1):
-                if stop_signal:
-                    break
-                elapsed = max(time.time() - start_time, 0.001)
-                pps = idx / elapsed
-                progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
-                if ("Failed" in result or "HTTP" in result) and not CLEAN_OUTPUT:
-                    console.print(result)
-    else:
+    connector = aiohttp.TCPConnector(limit=max_workers * 2, limit_per_host=max_workers)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        sem = asyncio.Semaphore(max(1, max_workers))
 
         async def download_worker(args):
-            url, folder = args
-            return await download_image(url, folder)
+            async with sem:
+                url, folder = args
+                return await download_image(url, folder, session=session)
 
         tasks = [download_worker(item) for item in urls_to_download]
-        for _ in await asyncio.gather(*tasks):
-            if stop_signal:
-                break
+
+        if not CLEAN_OUTPUT:
+            with Progress(
+                SpinnerColumn(style="green"),
+                TextColumn("[bold green]Downloading[/]"),
+                BarColumn(),
+                "[progress.percentage]{task.percentage:>3.1f}%",
+                "•",
+                TextColumn("{task.fields[pages_per_sec]} pages/sec"),
+                TimeElapsedColumn(),
+                TimeRemainingColumn(),
+                console=console,
+                transient=True,
+            ) as progress:
+                task = progress.add_task(
+                    "Downloading", total=total_pages, pages_per_sec="0.0"
+                )
+
+                for idx, result in enumerate(await asyncio.gather(*tasks), 1):
+                    if stop_signal:
+                        break
+                    elapsed = max(time.time() - start_time, 0.001)
+                    pps = idx / elapsed
+                    progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
+                    if ("Failed" in result or "HTTP" in result) and not CLEAN_OUTPUT:
+                        console.print(result)
+        else:
+            for _ in await asyncio.gather(*tasks):
+                if stop_signal:
+                    break
 
 
 # ------------------ MANGADEX FUNCTIONS ------------------
