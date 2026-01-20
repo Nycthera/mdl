@@ -178,7 +178,7 @@ def extract_manga_name_from_url(manga_input):
 
 async def url_exists(url: str) -> bool:
     try:
-        connector = aiohttp.TCPConnector(ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector) as session:
             async with session.head(
                 url,
@@ -505,9 +505,7 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
     for _, folder in urls_to_download:
         os.makedirs(folder, exist_ok=True)
 
-    connector = aiohttp.TCPConnector(
-        limit=max_workers * 2, limit_per_host=max_workers, ssl=False
-    )
+    connector = aiohttp.TCPConnector(limit=max_workers * 2, limit_per_host=max_workers)
     async with aiohttp.ClientSession(connector=connector) as session:
         sem = asyncio.Semaphore(max(1, max_workers))
 
