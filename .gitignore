@@ -31,7 +31,13 @@ build/
 dist/
 main.spec
 
-#Custom files
+# Custom files
 test.py
 
 .ruff_cache/
+
+# Custom manga output folders
+**/*.cbz
+
+# to do files
+todo.md

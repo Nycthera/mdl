@@ -12,14 +12,12 @@ import shutil
 import signal
 import subprocess
 import sys
-import time
 import zipfile
 from collections import defaultdict
 from urllib.parse import urljoin, urlparse
 
 # Third-party libraries
 import aiohttp
-import requests
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 from rich.align import Align
@@ -35,16 +33,9 @@ from rich.progress import (
 )
 from rich.table import Table
 
-
 # ------------ CONSTANTS ------------
 
-pattern = re.compile(r"/manga/[^/]+/\d{4}-\d{3,4}\.png$", re.IGNORECASE)
-title_pattern = re.compile(r"/manga/([^/]+)/")  # extract title part
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/122.0.0.0 Safari/537.36"
-)
+TITLE_PATTERN = re.compile(r"/manga/([^/]+)/", re.IGNORECASE)
 SOFTWARE_VERSION = "3.3 stable"
 
 
@@ -109,6 +100,20 @@ def cprint(msg, color=Colors.RESET):
     print(color + msg + Colors.RESET)
 
 
+def _loop_time() -> float:
+    """Return the current event-loop time for consistent async timing."""
+    return asyncio.get_running_loop().time()
+
+
+async def _cancel_pending_tasks(tasks: list[asyncio.Task]) -> None:
+    """Cancel pending tasks and swallow cancellation exceptions."""
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
 # ------------------ BASE URLS ------------------
 BASE_URLS = [
     "https://scans.lastation.us/manga/",
@@ -118,14 +123,6 @@ BASE_URLS = [
 ]
 
 API_ENDPOINT = "https://api.mangadex.org"
-session = requests.Session()
-session.headers.update(
-    {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
-    }
-)
 
 
 # ------------------ CONFIG ------------------
@@ -139,6 +136,7 @@ def create_default_config():
         "cbz": True,
         "clean_output": False,
         "md_language": "en",
+        "credits_shown": False,
     }
     with open(CONFIG_FILE, "w") as f:
         json.dump(default_config, f, indent=4)
@@ -149,7 +147,18 @@ def load_config():
     if not os.path.exists(CONFIG_FILE):
         create_default_config()
     with open(CONFIG_FILE, "r") as f:
-        return json.load(f)
+        config = json.load(f)
+
+    changed = False
+    if "credits_shown" not in config:
+        config["credits_shown"] = False
+        changed = True
+
+    if changed:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=4)
+
+    return config
 
 
 # ------------------ HELPERS ------------------
@@ -176,18 +185,95 @@ def extract_manga_name_from_url(manga_input):
     return manga_input
 
 
-async def url_exists(url: str) -> bool:
+def extract_title_from_image_urls(img_urls):
+    for url in img_urls:
+        match = TITLE_PATTERN.search(url)
+        if match:
+            return match.group(1)
+    return "Unknown_Title"
+
+
+async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
     try:
-        connector = aiohttp.TCPConnector()
-        async with aiohttp.ClientSession(connector=connector) as session:
-            async with session.head(
-                url,
-                allow_redirects=True,
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as response:
-                return response.status == 200
+        async with session.head(
+            url,
+            allow_redirects=True,
+            timeout=aiohttp.ClientTimeout(total=5),
+        ) as response:
+            return response.status == 200
     except Exception:
         return False
+
+
+def _build_chapter_urls(
+    manga_name: str, chapter_str: str, start_page: int, max_pages: int
+):
+    return [
+        f"{base}{manga_name}/{chapter_str}-{page:03d}.png"
+        for base in BASE_URLS
+        for page in range(start_page, max_pages + 1)
+    ]
+
+
+async def _collect_existing_urls(
+    urls: list[str],
+    label: str,
+    workers: int,
+    session: aiohttp.ClientSession,
+):
+    if not urls:
+        return []
+
+    sem = asyncio.Semaphore(max(1, workers))
+
+    async def check_one(u):
+        async with sem:
+            return u, await url_exists(session, u)
+
+    tasks = [asyncio.create_task(check_one(u)) for u in urls]
+    found_urls = []
+
+    if not CLEAN_OUTPUT:
+        with Progress(
+            SpinnerColumn(style="yellow"),
+            TextColumn(f"[bold yellow]{label}[/]"),
+            BarColumn(),
+            "[progress.percentage]{task.percentage:>3.1f}%",
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,
+        ) as progress:
+            task = progress.add_task("Checking", total=len(urls))
+            for coro in asyncio.as_completed(tasks):
+                url, exists = await coro
+                progress.update(task, advance=1)
+                if exists:
+                    found_urls.append(url)
+    else:
+        for coro in asyncio.as_completed(tasks):
+            url, exists = await coro
+            if exists:
+                found_urls.append(url)
+
+    return found_urls
+
+
+async def _collect_chapter_urls_for_download(
+    manga_name: str,
+    chapter_label: str,
+    start_page: int,
+    max_pages: int,
+    folder_base: str,
+    workers: int,
+    session: aiohttp.ClientSession,
+):
+    chapter_folder = os.path.join(folder_base, f"chapter_{chapter_label}")
+    os.makedirs(chapter_folder, exist_ok=True)
+    urls = _build_chapter_urls(manga_name, chapter_label, start_page, max_pages)
+    found_urls = await _collect_existing_urls(
+        urls, f"Checking Chapter {chapter_label}", workers, session
+    )
+    return found_urls, chapter_folder
 
 
 # ------------------ RATE LIMITER ------------------
@@ -206,14 +292,14 @@ class RateLimiter:
     async def acquire(self, key="global"):
         lock = await self._get_lock()
         async with lock:
-            now = time.time()
+            now = _loop_time()
             calls = self.calls[key]
             while calls and calls[0] <= now - self.per_seconds:
                 calls.pop(0)
             if len(calls) >= self.max_calls:
                 sleep_for = self.per_seconds - (now - calls[0])
                 await asyncio.sleep(max(sleep_for, 0))
-            self.calls[key].append(time.time())
+            self.calls[key].append(_loop_time())
 
 
 rate_limiter = RateLimiter(max_calls=5, per_seconds=1)
@@ -367,130 +453,79 @@ async def gather_all_urls(
     if not CLEAN_OUTPUT:
         console.print(f"[yellow]Gathering pages for {manga_name}...[/]")
 
-    chapter = start_chapter
-    while True:
-        if stop_signal:
-            break
-        chapter_str = f"{chapter:04d}"
-        check_tasks = [
-            url_exists(f"{base}{manga_name}/{chapter_str}-001.png")
-            for base in BASE_URLS
-        ]
-        results = await asyncio.gather(*check_tasks)
-        found_any = any(results)
-
-        if found_any:
-            chapter_folder = os.path.join(folder_base, f"chapter_{chapter_str}")
-            os.makedirs(chapter_folder, exist_ok=True)
-            urls = [
-                f"{base}{manga_name}/{chapter_str}-{page:03d}.png"
-                for base in BASE_URLS
-                for page in range(1, max_pages + 1)
-            ]
-            pages_found = 0
-
-            # bounded concurrency for smoother progress
-            sem = asyncio.Semaphore(max(1, workers))
-
-            async def check_one(u):
-                async with sem:
-                    return u, await url_exists(u)
-
-            tasks = [asyncio.create_task(check_one(u)) for u in urls]
-
-            if not CLEAN_OUTPUT:
-                with Progress(
-                    SpinnerColumn(style="yellow"),
-                    TextColumn(f"[bold yellow]Checking Chapter {chapter_str}[/]"),
-                    BarColumn(),
-                    "[progress.percentage]{task.percentage:>3.1f}%",
-                    TimeElapsedColumn(),
-                    console=console,
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task("Checking", total=len(urls))
-                    for coro in asyncio.as_completed(tasks):
-                        url, exists = await coro
-                        progress.update(task, advance=1)
-                        if exists:
-                            urls_to_download.append((url, chapter_folder))
-                            pages_found += 1
-            else:
-                for coro in asyncio.as_completed(tasks):
-                    url, exists = await coro
-                    if exists:
-                        urls_to_download.append((url, chapter_folder))
-                        pages_found += 1
-            if not CLEAN_OUTPUT:
-                console.print(
-                    f"[green]Chapter {chapter_str}: {pages_found} pages found[/]"
-                )
-
-        else:
-            decimal_found_any = False
-            for dec in range(1, max_decimals + 1):
-                chapter_decimal_str = f"{chapter_str}.{dec}"
-                first_page_url = (
-                    f"{BASE_URLS[0]}{manga_name}/{chapter_decimal_str}-001.png"
-                )
-                if await url_exists(first_page_url):
-                    decimal_found_any = True
-                    chapter_folder = os.path.join(
-                        folder_base, f"chapter_{chapter_decimal_str}"
-                    )
-                    os.makedirs(chapter_folder, exist_ok=True)
-                    urls = [
-                        f"{base}{manga_name}/{chapter_decimal_str}-{page:03d}.png"
-                        for base in BASE_URLS
-                        for page in range(1, max_pages + 1)
-                    ]
-                    pages_found = 0
-
-                    # bounded concurrency for decimal chapter
-                    sem = asyncio.Semaphore(max(1, workers))
-
-                    async def check_one(u):
-                        async with sem:
-                            return u, await url_exists(u)
-
-                    tasks = [asyncio.create_task(check_one(u)) for u in urls]
-
-                    if not CLEAN_OUTPUT:
-                        with Progress(
-                            SpinnerColumn(style="yellow"),
-                            TextColumn(
-                                f"[bold yellow]Checking Chapter {chapter_decimal_str}[/]"
-                            ),
-                            BarColumn(),
-                            "[progress.percentage]{task.percentage:>3.1f}%",
-                            TimeElapsedColumn(),
-                            console=console,
-                            transient=True,
-                        ) as progress:
-                            task = progress.add_task("Checking", total=len(urls))
-                            for coro in asyncio.as_completed(tasks):
-                                url, exists = await coro
-                                progress.update(task, advance=1)
-                                if exists:
-                                    urls_to_download.append((url, chapter_folder))
-                                    pages_found += 1
-                    else:
-                        for coro in asyncio.as_completed(tasks):
-                            url, exists = await coro
-                            if exists:
-                                urls_to_download.append((url, chapter_folder))
-                                pages_found += 1
-                    if not CLEAN_OUTPUT:
-                        console.print(
-                            f"[green]Chapter {chapter_decimal_str}: {pages_found} pages found[/]"
-                        )
-
-            if not decimal_found_any:
-                if not CLEAN_OUTPUT:
-                    console.print(f"[red]Chapter {chapter_str} not found. Stopping.[/]")
+    # Reuse one session to reduce overhead when probing many URLs.
+    connector = aiohttp.TCPConnector(
+        limit=max(1, workers * 2),
+        limit_per_host=max(1, workers),
+    )
+    async with aiohttp.ClientSession(connector=connector) as session:
+        chapter = start_chapter
+        while True:
+            if stop_signal:
                 break
 
-        chapter += 1
+            chapter_str = f"{chapter:04d}"
+            check_tasks = [
+                url_exists(session, f"{base}{manga_name}/{chapter_str}-001.png")
+                for base in BASE_URLS
+            ]
+            results = await asyncio.gather(*check_tasks)
+            found_any = any(results)
+
+            if found_any:
+                found_urls, chapter_folder = await _collect_chapter_urls_for_download(
+                    manga_name,
+                    chapter_str,
+                    start_page,
+                    max_pages,
+                    folder_base,
+                    workers,
+                    session,
+                )
+                urls_to_download.extend((url, chapter_folder) for url in found_urls)
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[green]Chapter {chapter_str}: {len(found_urls)} pages found[/]"
+                    )
+
+            else:
+                # Fallback: look for decimal chapters like 0001.5 when 0001 is missing.
+                decimal_found_any = False
+                for dec in range(1, max_decimals + 1):
+                    chapter_decimal_str = f"{chapter_str}.{dec}"
+                    first_page_url = (
+                        f"{BASE_URLS[0]}{manga_name}/{chapter_decimal_str}-001.png"
+                    )
+                    if await url_exists(session, first_page_url):
+                        decimal_found_any = True
+                        (
+                            found_urls,
+                            chapter_folder,
+                        ) = await _collect_chapter_urls_for_download(
+                            manga_name,
+                            chapter_decimal_str,
+                            start_page,
+                            max_pages,
+                            folder_base,
+                            workers,
+                            session,
+                        )
+                        urls_to_download.extend(
+                            (url, chapter_folder) for url in found_urls
+                        )
+                        if not CLEAN_OUTPUT:
+                            console.print(
+                                f"[green]Chapter {chapter_decimal_str}: {len(found_urls)} pages found[/]"
+                            )
+
+                if not decimal_found_any:
+                    if not CLEAN_OUTPUT:
+                        console.print(
+                            f"[red]Chapter {chapter_str} not found. Stopping.[/]"
+                        )
+                    break
+
+            chapter += 1
 
     return urls_to_download
 
@@ -501,7 +536,6 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
     if total_pages == 0:
         return
 
-    start_time = time.time()
     for _, folder in urls_to_download:
         os.makedirs(folder, exist_ok=True)
 
@@ -514,7 +548,9 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
                 url, folder = args
                 return await download_image(url, folder, session=session)
 
-        tasks = [download_worker(item) for item in urls_to_download]
+        tasks = [
+            asyncio.create_task(download_worker(item)) for item in urls_to_download
+        ]
 
         if not CLEAN_OUTPUT:
             with Progress(
@@ -533,17 +569,24 @@ async def download_all_pages(urls_to_download, max_workers=10, manga_name="manga
                     "Downloading", total=total_pages, pages_per_sec="0.0"
                 )
 
-                for idx, result in enumerate(await asyncio.gather(*tasks), 1):
+                start_time = _loop_time()
+                completed = 0
+                for future in asyncio.as_completed(tasks):
+                    result = await future
+                    completed += 1
                     if stop_signal:
+                        await _cancel_pending_tasks(tasks)
                         break
-                    elapsed = max(time.time() - start_time, 0.001)
-                    pps = idx / elapsed
+                    elapsed = max(_loop_time() - start_time, 0.001)
+                    pps = completed / elapsed
                     progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
-                    if ("Failed" in result or "HTTP" in result) and not CLEAN_OUTPUT:
+                    if "Failed" in result or "HTTP" in result:
                         console.print(result)
         else:
-            for _ in await asyncio.gather(*tasks):
+            for future in asyncio.as_completed(tasks):
+                await future
                 if stop_signal:
+                    await _cancel_pending_tasks(tasks)
                     break
 
 
@@ -559,7 +602,13 @@ def extract_manga_uuid(url: str) -> str:
     return None
 
 
-async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
+async def fetch_all_chapters_md(
+    manga_uuid: str, lang="en", session: aiohttp.ClientSession | None = None
+):
+    if session is None:
+        async with aiohttp.ClientSession() as session:
+            return await fetch_all_chapters_md(manga_uuid, lang=lang, session=session)
+
     chapters = []
     limit = 100
     offset = 0
@@ -573,52 +622,64 @@ async def fetch_all_chapters_md(manga_uuid: str, lang="en"):
             "offset": offset,
             "order[chapter]": "asc",
         }
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{API_ENDPOINT}/chapter", params=params) as resp:
-                if resp.status == 429:
-                    console.print(
-                        "[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]"
-                    )
-                    await asyncio.sleep(5)
-                    continue
-                elif resp.status != 200:
-                    console.print(f"[red]Error fetching chapters: {resp.status}[/]")
-                    break
-                data = await resp.json()
-                batch = data.get("data", [])
-                chapters.extend(batch)
-                total = data.get("total", 0)
-                if offset + limit >= total:
-                    break
-                offset += limit
+        async with session.get(f"{API_ENDPOINT}/chapter", params=params) as resp:
+            if resp.status == 429:
+                console.print(
+                    "[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]"
+                )
+                await asyncio.sleep(5)
+                continue
+            elif resp.status != 200:
+                console.print(f"[red]Error fetching chapters: {resp.status}[/]")
+                break
+            data = await resp.json()
+            batch = data.get("data", [])
+            chapters.extend(batch)
+            total = data.get("total", 0)
+            if offset + limit >= total:
+                break
+            offset += limit
     return chapters
 
 
-async def get_images_md(chapter_id: str, use_saver=False, max_retries=5):
+async def get_images_md(
+    chapter_id: str,
+    use_saver=False,
+    max_retries=5,
+    session: aiohttp.ClientSession | None = None,
+):
+    if session is None:
+        async with aiohttp.ClientSession() as session:
+            return await get_images_md(
+                chapter_id,
+                use_saver=use_saver,
+                max_retries=max_retries,
+                session=session,
+            )
+
     for attempt in range(max_retries):
         await rate_limiter_athome.acquire("mangadex_athome")
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"https://api.mangadex.org/at-home/server/{chapter_id}"
-            ) as resp:
-                if resp.status == 429:
-                    wait = (attempt + 1) * 5
-                    console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
-                    await asyncio.sleep(wait)
-                    continue
-                elif resp.status != 200:
-                    console.print(
-                        f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]"
-                    )
-                    return []
-                data = await resp.json()
-                chapter_data = data.get("chapter", {})
-                base_url = data.get("baseUrl")
-                hash_code = chapter_data.get("hash")
-                pages = chapter_data.get("dataSaver" if use_saver else "data", [])
-                if not base_url or not hash_code or not pages:
-                    return []
-                return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
+        async with session.get(
+            f"https://api.mangadex.org/at-home/server/{chapter_id}"
+        ) as resp:
+            if resp.status == 429:
+                wait = (attempt + 1) * 5
+                console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
+                await asyncio.sleep(wait)
+                continue
+            elif resp.status != 200:
+                console.print(
+                    f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]"
+                )
+                return []
+            data = await resp.json()
+            chapter_data = data.get("chapter", {})
+            base_url = data.get("baseUrl")
+            hash_code = chapter_data.get("hash")
+            pages = chapter_data.get("dataSaver" if use_saver else "data", [])
+            if not base_url or not hash_code or not pages:
+                return []
+            return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
     return []
 
 
@@ -630,95 +691,106 @@ async def download_md_chapters(manga_url, lang="en", use_saver=False, create_cbz
         console.print("[red]Could not extract manga UUID from URL[/]")
         return
 
-    manga_name_clean = await get_manga_name_from_md(manga_url, lang=lang)
-    manga_name_clean = sanitize_folder_name(manga_name_clean)
+    async with aiohttp.ClientSession() as session:
+        manga_name_clean = await get_manga_name_from_md(
+            manga_url, lang=lang, session=session
+        )
+        manga_name_clean = sanitize_folder_name(manga_name_clean)
 
-    # Root folder named after manga
-    manga_root_folder = manga_name_clean
-    os.makedirs(manga_root_folder, exist_ok=True)
+        # Root folder named after manga
+        manga_root_folder = manga_name_clean
+        os.makedirs(manga_root_folder, exist_ok=True)
 
-    if not CLEAN_OUTPUT:
-        console.print(f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]")
-    chapters = await fetch_all_chapters_md(manga_uuid, lang)
-    if not CLEAN_OUTPUT:
-        console.print(f"[green]Found {len(chapters)} chapters[/]")
-
-    total_pages_downloaded = 0
-    total_chapters_downloaded = 0
-
-    for chapter in chapters:
-        attr = chapter.get("attributes", {})
-        chapter_num = attr.get("chapter", "Unknown")
-        chapter_title = attr.get("title", "")
-        chap_id = chapter.get("id")
-
-        # Subfolder per chapter
-        chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
-        chapter_folder_name = sanitize_folder_name(chapter_folder_name)
-        chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
-
-        images = await get_images_md(chap_id, use_saver=use_saver)
-        if not images:
-            if not CLEAN_OUTPUT:
-                console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
-            continue
-
-        os.makedirs(chapter_folder, exist_ok=True)
         if not CLEAN_OUTPUT:
             console.print(
-                f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]"
+                f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]"
+            )
+        chapters = await fetch_all_chapters_md(manga_uuid, lang, session=session)
+        if not CLEAN_OUTPUT:
+            console.print(f"[green]Found {len(chapters)} chapters[/]")
+
+        total_pages_downloaded = 0
+        total_chapters_downloaded = 0
+
+        for chapter in chapters:
+            attr = chapter.get("attributes", {})
+            chapter_num = attr.get("chapter", "Unknown")
+            chapter_title = attr.get("title", "")
+            chap_id = chapter.get("id")
+
+            # Subfolder per chapter
+            chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
+            chapter_folder_name = sanitize_folder_name(chapter_folder_name)
+            chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
+
+            images = await get_images_md(chap_id, use_saver=use_saver, session=session)
+            if not images:
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[yellow]Skipping Chapter {chapter_num} (no images)[/]"
+                    )
+                continue
+
+            os.makedirs(chapter_folder, exist_ok=True)
+            if not CLEAN_OUTPUT:
+                console.print(
+                    f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]"
+                )
+
+            urls_to_download = [(url, chapter_folder) for url in images]
+            await download_all_pages(
+                urls_to_download, max_workers=10, manga_name=manga_name_clean
             )
 
-        urls_to_download = [(url, chapter_folder) for url in images]
-        await download_all_pages(
-            urls_to_download, max_workers=10, manga_name=manga_name_clean
-        )
+            total_pages_downloaded += len(images)
+            total_chapters_downloaded += 1
 
-        total_pages_downloaded += len(images)
-        total_chapters_downloaded += 1
+            if not os.listdir(chapter_folder):
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[red]Removing empty folder {chapter_folder_name}[/]"
+                    )
+                os.rmdir(chapter_folder)
 
-        if not os.listdir(chapter_folder):
-            if not CLEAN_OUTPUT:
-                console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
-            os.rmdir(chapter_folder)
+        # Create CBZ from the manga root folder
+        cbz_path = None
+        if create_cbz:
+            cbz_path = create_cbz_for_all(manga_root_folder)
 
-    # Create CBZ from the manga root folder
-    cbz_path = None
-    if create_cbz:
-        cbz_path = create_cbz_for_all(manga_root_folder)
-
-    # Summary output for clean mode
-    if CLEAN_OUTPUT:
-        msg = (
-            f"Downloaded '{manga_name_clean}' (lang={lang}): "
-            f"chapters={total_chapters_downloaded}, pages={total_pages_downloaded}"
-        )
-        if cbz_path:
-            msg += f", cbz='{cbz_path}'"
-        print(msg)
+        # Summary output for clean mode
+        if CLEAN_OUTPUT:
+            msg = (
+                f"Downloaded '{manga_name_clean}' (lang={lang}): "
+                f"chapters={total_chapters_downloaded}, pages={total_pages_downloaded}"
+            )
+            if cbz_path:
+                msg += f", cbz='{cbz_path}'"
+            print(msg)
 
 
-async def get_manga_name_from_md(manga_url, lang="en"):
+async def get_manga_name_from_md(
+    manga_url, lang="en", session: aiohttp.ClientSession | None = None
+):
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         return extract_manga_name_from_url(manga_url)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{API_ENDPOINT}/manga/{manga_uuid}") as resp:
-            if resp.status != 200:
-                return extract_manga_name_from_url(manga_url)
-            data = await resp.json()
-            data_obj = data.get("data", {})
-            attributes = data_obj.get("attributes", {})
-            title_dict = attributes.get("title", {})
-            return (
-                title_dict.get(lang)
-                or title_dict.get("en")
-                or list(title_dict.values())[0]
-            )
+    if session is None:
+        async with aiohttp.ClientSession() as session:
+            return await get_manga_name_from_md(manga_url, lang=lang, session=session)
+    async with session.get(f"{API_ENDPOINT}/manga/{manga_uuid}") as resp:
+        if resp.status != 200:
+            return extract_manga_name_from_url(manga_url)
+        data = await resp.json()
+        data_obj = data.get("data", {})
+        attributes = data_obj.get("attributes", {})
+        title_dict = attributes.get("title", {})
+        return (
+            title_dict.get(lang) or title_dict.get("en") or list(title_dict.values())[0]
+        )
 
 
 # Literal method to get from the manga link, instead of image URL
-async def check_url_weebcentral(url):
+async def fetch_weebcentral_images(url):
     if not CLEAN_OUTPUT:
         console.print(
             Panel.fit(
@@ -788,13 +860,7 @@ async def check_url_weebcentral(url):
             if src and "/manga/" in src and src.endswith(".png"):
                 img_urls.append(urljoin(url, src))
 
-        title_pattern = re.compile(r"/manga/([^/]+)/", re.IGNORECASE)
-        title = "Unknown_Title"
-        for u in img_urls:
-            match = title_pattern.search(u)
-            if match:
-                title = match.group(1)
-                break
+        title = extract_title_from_image_urls(img_urls)
 
         await browser.close()
 
@@ -827,12 +893,6 @@ async def check_url_weebcentral(url):
             )
 
         return img_urls, title
-
-
-def create_single_weebcentral_url(title):
-    baseurl = BASE_URLS[0]
-    url = f"{baseurl}{title}/0001-001.png"
-    return url
 
 
 def safe_delete_folder(folder_path):
@@ -988,6 +1048,54 @@ def update():
     print("To start Node server: cd Manga-API && npm start")
 
 
+def credits(show: bool = False):
+    """Return a structured list of credits. Optionally print a table."""
+    entries = [
+        {
+            "name": "WeebCentral",
+            "url": "https://weebcentral.com/",
+            "description": "Manga hosting site used as a scraping source.",
+            "category": "Site",
+        },
+        {
+            "name": "MangaDex",
+            "url": "https://mangadex.org/",
+            "description": "Official API source for direct, reliable downloads.",
+            "category": "API",
+        },
+        {
+            "name": "Playwright",
+            "url": "https://playwright.dev/",
+            "description": "Browser automation used to capture dynamic image URLs.",
+            "category": "Library",
+        },
+    ]
+
+    if show:
+        if CLEAN_OUTPUT:
+            print("Credits:")
+            for item in entries:
+                print(
+                    f"- {item['name']} ({item['category']}): {item['description']} {item['url']}"
+                )
+        else:
+            table = Table(title="Credits")
+            table.add_column("Name", style="cyan", no_wrap=True)
+            table.add_column("Category", style="magenta", no_wrap=True)
+            table.add_column("Description", style="white")
+            table.add_column("URL", style="green")
+            for item in entries:
+                table.add_row(
+                    item["name"],
+                    item["category"],
+                    item["description"],
+                    item["url"],
+                )
+            console.print(Panel.fit(table, border_style="cyan"))
+
+    return entries
+
+
 # ------------------ CLI ------------------
 def parse_args():
     parser = argparse.ArgumentParser(description="Manga Downloader CLI")
@@ -1004,6 +1112,11 @@ def parse_args():
     )
     parser.add_argument(
         "--md-lang", default=None, help="Language code for MangaDex download"
+    )
+    parser.add_argument(
+        "--credits",
+        action="store_true",
+        help="Show credits and exit",
     )
     parser.add_argument("--update", action="store_true", help="Update the application")
     parser.add_argument(
@@ -1026,6 +1139,7 @@ async def main():
     md_lang = args.md_lang or config.get("md_language", "en")
     update_flag = args.update or config.get("update", False)
     clean_flag = args.clean_output or config.get("clean_output", False)
+    credits_flag = args.credits
 
     # configure output mode (do not disable colors; just trim output)
     global CLEAN_OUTPUT
@@ -1034,6 +1148,16 @@ async def main():
     if update_flag:
         update()
         return
+
+    if credits_flag:
+        credits(show=True)
+        return
+
+    if not config.get("credits_shown", False):
+        credits(show=True)
+        config["credits_shown"] = True
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(config, f, indent=4)
 
     validate_manga_input(manga_name)
 
@@ -1054,18 +1178,16 @@ async def main():
                     border_style="magenta",
                 )
             )
-        img_urls, title = await check_url_weebcentral(manga_name)
-        pretty_name = sanitize_folder_name(title)
-
+        img_urls, title = await fetch_weebcentral_images(manga_name)
         if not img_urls:
             console.print("[red]No images detected, exiting WeebCentral mode.[/]")
             sys.exit(1)
 
+        slug, pretty_name = get_slug_and_pretty(title)
         if not CLEAN_OUTPUT:
             console.print(
                 f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
             )
-        slug, pretty_name = get_slug_and_pretty(title)
 
         # For WeebCentral, use gather_all_urls starting from chapter 1 to find all chapters
         urls_to_download = await gather_all_urls(
@@ -1151,8 +1273,7 @@ async def main():
 if __name__ == "__main__":
     # Skip banner when clean output requested via CLI
     if "--clean-output" not in sys.argv:
-        print(
-            """
+        print("""
 \033[96m          
  _ __ ___   __ _ _ __   __ _  __ _                       
 | '_ ` _ \\ / _` | '_ \\ / _` |/ _` |                      
@@ -1164,6 +1285,5 @@ if __name__ == "__main__":
 | (_| |  __/\\ V  V /| | | | | (_) | (_| | (_| |
  \\__,_|\\___| \\_/\\_/ |_| |_|_|\\___/ \\__,_|\\__,_|
 \033[0m
-"""
-        )
+""")
     asyncio.run(main())
