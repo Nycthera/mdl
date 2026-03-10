@@ -51,7 +51,36 @@ if exist package.json (
 cd ..
 
 echo.
-echo Installation complete.
+echo ==========================================
+echo   Installing CLI Command
+echo ==========================================
+
+REM Create bin directory
+if not exist bin (
+    mkdir bin
+)
+
+REM Create mdl.bat wrapper script
+(
+    echo @echo off
+    echo REM Manga Downloader CLI wrapper
+    echo setlocal enabledelayedexpansion
+    echo set mdl_dir=%cd%
+    echo if exist "!mdl_dir!\venv\Scripts\python.exe" (
+    echo     "!mdl_dir!\venv\Scripts\python.exe" "!mdl_dir!\main.py" %%*
+    echo ) else (
+    echo     python "!mdl_dir!\main.py" %%*
+    echo )
+) > bin\mdl.bat
+
+echo.
+echo Installation complete!
+echo CLI wrapper created at: bin\mdl.bat
+echo To use CLI globally:
+echo   1. Add this directory to PATH environment variable
+echo   2. Or run: bin\mdl [options]
+echo   3. Example: bin\mdl --help
+echo.
 echo To activate Python venv: call venv\Scripts\activate
-echo To start Node server: cd Manga-API && npm start
+echo To start Node server: cd Manga-API ^&^& npm start
 pause

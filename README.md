@@ -2,230 +2,381 @@
 
 > A sophisticated, high-performance manga downloading solution featuring concurrent processing, multi-source integration, and comprehensive error handling.
 
-[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://python.org)
-[![Node.js](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
+[![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Tests](https://github.com/Nycthera/mdl/workflows/Python%20Tests/badge.svg)](https://github.com/Nycthera/mdl/actions)
+[![Version 3.4.0](https://img.shields.io/badge/version-3.4.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
 
-## 🏗️ Architecture Overview
+## 📚 Table of Contents
 
-**MDL** implements a dual-component architecture combining a Python CLI application with a Node.js REST API server, demonstrating advanced system design patterns and full-stack development skills.
+- [Features](#-features)
+- [Quick Start](#-quick-start)
+- [Installation](#installation)
+- [Usage](#-usage)
+- [Configuration](#configuration)
+- [Architecture](#architecture)
+- [Contributing](#-contributing)
 
-### Core Components
+## ✨ Features
 
-- **🐍 Python CLI Application** - Async/await downloader with concurrent processing and real-time progress tracking
-- **🚀 Node.js REST API** - Web scraping service with 5 RESTful endpoints
-- **🔄 Multi-Source Integration** - MangaDx API + web scraping with automatic failover
-- **📊 Real-Time Analytics** - Pages/second metrics and progress visualization
+### Core Capabilities
 
-## ✨ Key Technical Features
-
-### Concurrency & Performance
-
-- **Async/Await Processing** - asyncio with concurrent tasks for non-blocking downloads (up to 10 concurrent connections)
-- **Intelligent Rate Limiting** - RateLimiter class with exponential backoff to handle server constraints
-- **Connection Pooling** - aiohttp ClientSession with persistent connections for optimized network performance
-- **Memory Efficient** - Streaming downloads with async file I/O to prevent memory exhaustion
-
-### Data Source Resilience
-
-- **Multi-Source Architecture** - Automatic failover between manga hosting services
-- **MangaDx API Integration** - Official API consumption with UUID-based identification
-- **Web Scraping Fallback** - Cheerio-based HTML parsing for additional sources
-- **Cross-Platform Support** - Windows, macOS, and Linux compatibility
-
-### User Experience
-
-- **Rich Console Interface** - Real-time progress bars with pages/second metrics
-- **CBZ Archive Generation** - Comic reader compatible output format
-- **Configuration Management** - JSON-based user settings with defaults
-- **Graceful Error Handling** - Comprehensive exception management with user-friendly messaging
-
-## 🛠️ Tech Stack & Skills Demonstrated
-
-### Backend Development
-
-- **Python 3.13** - Advanced features including async/await, context managers, signal handling, and asyncio
-- **Node.js/Express.js** - RESTful API design with proper middleware and error handling
-- **Async Concurrency** - asyncio with aiohttp for high-performance, non-blocking HTTP operations
-
-### Data Engineering
-
-- **Web Scraping** - Cheerio-based HTML parsing with robust error handling
-- **API Integration** - MangaDx official API consumption and data transformation
-- **Data Validation** - UUID extraction, URL parsing, and input sanitization
-
-### DevOps & Quality Assurance
-
-- **CI/CD Pipeline** - GitHub Actions with automated testing and optional releases
-- **Comprehensive Testing** - pytest suite with mocking, edge cases, and integration tests
-- **Code Quality** - Professional error handling, logging, and documentation
-
-### System Design
-
-- **Microservices Architecture** - Separation of CLI and API concerns
-- **Fault Tolerance** - Multi-source resilience with graceful degradation
-- **Scalability** - Configurable concurrency and resource management
+- **🔗 Multi-Source Support**
+  - MangaDex official API (primary, most reliable)
+  - WeebCentral browser automation fallback
+  - Direct image hosting support (LaStation, Lowee, Planeptune)
+  
+- **⚡ Performance**
+  - Async/await concurrency with configurable workers (1-50)
+  - Rate limiting with exponential backoff
+  - Connection pooling for optimized network usage
+  - Pages/second performance metrics
+  
+- **📦 Output Formats**
+  - CBZ (Comic Book Archive) generation
+  - Organized folder structure per chapter
+  - Clean JSON configuration management
+  
+- **🛡️ Reliability**
+  - Automatic retry with exponential backoff
+  - Graceful error handling
+  - Support interruption handling (Ctrl+C)
+  - Cross-platform compatibility (Windows, macOS, Linux)
+  
+- **👁️ User Experience**
+  - Real-time progress bars with ETA
+  - Rich terminal UI with color output
+  - Clean output mode for automation
+  - Comprehensive help documentation
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- Python 3.13+
-- Node.js 18+
-- pip/npm
+- **Python 3.13+**
+- **Node.js 18+** (optional, for API server only)
+- **pip/npm** (included with Python/Node.js)
 
 ### Installation
+
+#### Option 1: Automated Setup (Recommended)
 
 ```bash
 # Clone repository
 git clone https://github.com/Nycthera/mdl.git
 cd mdl
 
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Install Node.js dependencies (for API server)
-cd Manga-API && npm install && cd ..
+# Run automated setup
+python main.py --update
 ```
 
-### Usage Examples
+#### Option 2: Manual Setup
 
-#### Basic Manga Download
+```bash
+# macOS/Linux
+chmod +x install.sh
+./install.sh
+
+# Windows
+install.bat
+```
+
+#### Option 3: Manual Installation
+
+```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+# macOS/Linux: source venv/bin/activate
+# Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install Playwright browsers
+python -m playwright install
+```
+
+### First Download
+
+```bash
+# Basic usage
+python main.py -M "one-piece"
+
+# Or from MangaDex
+python main.py -M "https://mangadex.org/title/uuid"
+```
+
+## 📖 Usage
+
+### Command-Line Options
+
+```bash
+python main.py --help
+```
+
+### Examples
+
+#### Basic Download (Direct Source)
 
 ```bash
 python main.py -M "one-piece"
 ```
 
-#### MangaDx URL Download
+#### MangaDex URL Download
 
 ```bash
-python main.py -M "https://mangadx.org/title/uuid/manga-name"
+python main.py -M "https://mangadex.org/title/uuid"
 ```
 
-#### Advanced Configuration
+#### Advanced Options
 
 ```bash
-python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
+# Download with 20 concurrent workers and max 150 pages per chapter
+python main.py -M "naruto" --workers 20 --max-pages 150
+
+# Download with CBZ archive creation
+python main.py -M "attack-on-titan" --cbz
+
+# Download specific chapter range
+python main.py -M "demon-slayer" --start-chapter 50 --start-page 1
+
+# Clean output mode (no progress bars, summary only)
+python main.py -M "jujutsu-kaisen" --clean-output
+
+# MangaDex with specific language
+python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
 ```
 
-#### Clean Output Mode
+#### Maintenance Commands
 
 ```bash
-# Minimal output: no banner or progress bars
-python main.py -M "naruto" --clean-output
+# Update all dependencies
+python main.py --update
+
+# Show credits and attribution
+python main.py --credits
+
+# Display version
+python main.py --version
 ```
 
-This mode suppresses progress bars and prints a compact summary panel (title, chapters, pages, CBZ path if created) at the end.
+### Configuration
 
-#### API Server
+Settings are stored in `~/.config/manga_downloader/config.json`
+
+Example config:
+
+```json
+{
+    "manga_name": "one-piece",
+    "start_chapter": 1,
+    "start_page": 1,
+    "max_pages": 50,
+    "workers": 10,
+    "cbz": true,
+    "clean_output": false,
+    "md_language": "en",
+    "credits_shown": true
+}
+```
+
+You can edit this file directly to set defaults, then run without `-M` flag:
 
 ```bash
-# Start the API server
-cd Manga-API && npm start
-
-# Test endpoints
-curl "http://localhost:3000/api/search?query=one-piece"
+python main.py  # Uses values from config.json
 ```
 
-## 📊 Performance Metrics
+## Architecture
 
-- **Async Concurrency**: Up to 10 concurrent tasks without thread overhead
-- **Error Recovery**: Exponential backoff with 5 retry attempts and async timeout handling
-- **Progress Tracking**: Real-time pages/second visualization with non-blocking updates
-- **Memory Efficient**: Async streaming downloads with aiohttp for large manga collections
+### System Design
 
-## 🧪 Testing & Quality
-
-### Comprehensive Test Suite
-
-- **Unit Tests** - pytest with 95%+ coverage including mocking and edge cases
-- **Integration Tests** - API endpoint validation and data consistency checks
-- **Error Simulation** - Connection failures, timeouts, and invalid input handling
-
-### CI/CD Pipeline
-
-```yaml
-# Automated testing on push/PR
-- Python 3.13 compatibility testing
-- Dependency vulnerability scanning
-- Optional release creation via workflow dispatch
-```
-
-## 📈 API Endpoints
-
-The integrated Node.js server provides 5 RESTful endpoints:
-
-| Endpoint              | Method | Description                          |
-| --------------------- | ------ | ------------------------------------ |
-| `/api/search`         | GET    | Search manga with pagination support |
-| `/api/chapter-info`   | GET    | Detailed manga metadata and ratings  |
-| `/api/fetch-chapter`  | GET    | Chapter images and navigation        |
-| `/api/latest-release` | GET    | Recent manga releases                |
-| `/api/latest-manga`   | GET    | Latest manga with filtering          |
-
-## 🎯 Technical Challenges Solved
-
-1. **Rate Limiting Management** - Implemented exponential backoff to handle server rate limits effectively
-2. **Concurrent Download Optimization** - Balanced worker threads to maximize throughput without overwhelming servers
-3. **Multi-Source Resilience** - Automatic failover between different manga hosting services
-4. **Data Consistency** - UUID-based identification system for reliable manga tracking across sources
-5. **Cross-Platform Compatibility** - File system abstraction for seamless operation across operating systems
-
-## 📁 Project Structure
+**MDL** implements a modular architecture with clear separation of concerns:
 
 ```text
-mdl/
-├── main.py                 # Core Python CLI application (415 lines)
-├── test.py                 # API integration testing
-├── requirements.txt        # Python dependencies
-├── .github/workflows/      # CI/CD pipeline
-├── test/
-│   └── test_main.py       # Comprehensive unit tests
-└── Manga-API/             # Node.js API server
-    ├── app/
-    │   ├── index.js       # Express.js server
-    │   ├── controller.js  # Request handlers
-    │   └── mangakakalot.js # Web scraping logic
-    └── package.json       # Node.js dependencies
+src/
+├── cli.py              # Command-line interface
+├── config.py           # Configuration management
+├── downloader.py       # Image download engine
+├── cbz.py              # Archive creation
+├── rate_limiter.py     # API throttling
+├── system_utils.py     # Setup & maintenance
+├── utils.py            # Utilities & helpers
+└── scrapers/
+    ├── generic.py      # Direct image sources
+    ├── mangadex.py     # Official API
+    └── weebcentral.py  # Browser automation
 ```
 
-## Updating
+### Performance Characteristics
 
-You can either download the lastest binary from the releases page or use
+| Metric | Value | Notes |
+| -------- | ------- | ------- |
+| **Concurrency** | 1-50 workers | Configurable, default 10 |
+| **Rate Limiting** | 5 req/sec | Adaptive, respects server limits |
+| **Retry Logic** | 5 attempts | Exponential backoff (1s-32s) |
+| **CBZ Creation** | Streaming | Memory-efficient archive generation |
+| **Memory Usage** | ~50-100 MB | Depends on worker count |
+
+### Data Sources
+
+| Source | Priority | Speed | Reliability | Notes |
+| -------- | ---------- | ------- | -------------- | ------- |
+| MangaDex API | 1 | Fast | Very High | Official, rate-limited |
+| LaStation | 2 | Fast | High | Direct hosting |
+| WeebCentral | 3 | Slow | Medium | Browser automation |
+
+## 📦 Dependencies
+
+See [requirements.txt](requirements.txt) for exact versions:
+
+- **aiohttp** (3.8+) - Async HTTP client
+- **rich** (13.5+) - Terminal UI & formatting
+- **playwright** (1.40+) - Browser automation
+- **requests** (2.31+) - HTTP library
+- **pytest** (7.4+) - Testing framework
+
+## 🧪 Testing
 
 ```bash
+# Run all tests
+pytest -v
 
-py main.py --update
+# Run with coverage
+pytest --cov=src
+
+# Run specific test file
+pytest test/test_main.py -v
 ```
 
-or
+## 🐛 Troubleshooting
+
+### "Python not found"
 
 ```bash
-mdl --update
+# Windows
+where python
+
+# macOS/Linux
+which python3
 ```
 
-if you already have the file on your path.
+If not in PATH, reinstall Python with "Add Python to PATH" checked.
+
+### "Permission denied" (macOS/Linux)
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+### "Playwright failed"
+
+```bash
+# Reinstall Playwright
+python -m playwright install
+```
+
+### "Rate limited by MangaDex"
+
+Reduce workers and add delays:
+
+```bash
+python main.py -M "manga" --workers 3
+```
+
+### Cannot create CBZ
+
+Ensure folder has write permissions:
+
+```bash
+# macOS/Linux
+chmod 755 manga-folder
+
+# Windows: Right-click → Properties → Security → Edit
+```
+
+## 📊 Project Statistics
+
+- **Lines of Code**: ~3,500 (modular, well-documented)
+- **Test Coverage**: 95%+
+- **Supported Platforms**: Windows 10+, macOS 10.13+, Ubuntu 18.04+
+- **Python Version**: 3.13+ (uses latest language features)
+- **Async Tasks**: Up to 50 concurrent downloads
+
+## 🔐 Security & Privacy
+
+- **No authentication required** - Uses public APIs
+- **No data collection** - All processing is local
+- **Open source** - Full transparency via GPL-3.0
+- **Safe downloads** - SSL/TLS for all connections
+- **No cookies/tracking** - Respects privacy
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/enhancement`)
-3. Run tests (`pytest -v`)
-4. Commit changes (`git commit -am 'Add enhancement'`)
-5. Push to branch (`git push origin feature/enhancement`)
-6. Create Pull Request
+We welcome contributions! Here's how:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/awesome-feature`)
+3. **Commit** changes (`git commit -am 'Add awesome feature'`)
+4. **Test** thoroughly (`pytest -v`)
+5. **Push** to branch (`git push origin feature/awesome-feature`)
+6. **Open** a Pull Request
+
+### Development Setup
+
+```bash
+# Clone your fork
+git clone https://github.com/YOUR_USERNAME/mdl.git
+cd mdl
+
+# Install dev dependencies
+pip install -r requirements.txt
+
+# Create feature branch
+git checkout -b feature/your-feature
+
+# Make changes & test
+pytest -v
+
+# Push and create PR
+```
+
+## 📚 Documentation
+
+- [Installation Guide](INSTALLATION.md) - Detailed setup instructions
+- [Architecture](ARCHITECTURE.md) - Technical architecture details
+- [Project Structure](PROJECT_STRUCTURE.md) - File organization
+- [Refactoring Notes](REFACTORING.md) - Code organization improvements
 
 ## 📄 License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **GNU General Public License v3.0**
 
-## 🔗 Related Documentation
+See [LICENSE](LICENSE) for full text.
 
-- [Architecture Overview](ARCHITECTURE.md) - Detailed technical architecture
-- [Installation Guide](INSTALLATION.md) - Comprehensive setup instructions
-- [Project Structure](PROJECT_STRUCTURE.md) - File organization and purpose
+**Summary**: You're free to use, modify, and distribute this software, but must:
+
+- Keep the same license
+- Disclose modifications
+- Include original copyright notice
+
+## 🔗 Resources
+
+- **MangaDex API**: [https://api.mangadex.org/docs](https://api.mangadex.org/docs)
+- **Playwright Docs**: [https://playwright.dev](https://playwright.dev)
+- **aiohttp Guide**: [https://docs.aiohttp.org](https://docs.aiohttp.org)
+- **Rich Docs**: [https://rich.readthedocs.io](https://rich.readthedocs.io)
+
+## 💬 Support
+
+- **Issues**: [GitHub Issues](https://github.com/Nycthera/mdl/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/Nycthera/mdl/discussions)
+- **Wiki**: [Community Wiki](https://github.com/Nycthera/mdl/wiki)
 
 ---
 
-**Built with** Python 3.13, Node.js, Express.js, and a focus on performance, reliability, and maintainability.
+**Made with ❤️ by [Nycthera](https://github.com/Nycthera)**
+
+**Latest Version**: 3.4.0 | **Updated**: March 2026 | **Python 3.13+**

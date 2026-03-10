@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 import aiohttp
 
-import main  # your main.py
+
+import src.config as config_mod
+import src.utils as utils_mod
+from src.cbz import create_cbz_for_all
+import src.scrapers.mangadex as mangadex_mod
+from src.downloader import download_image
 
 
 # ---------- CONFIG TESTS ----------
@@ -15,9 +20,9 @@ import main  # your main.py
 
 def test_create_default_config(tmp_path: Path, monkeypatch):
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr(main, "CONFIG_FILE", cfg_path)
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(cfg_path))
 
-    main.create_default_config()
+    config_mod.create_default_config()
     assert cfg_path.exists()
 
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -27,9 +32,9 @@ def test_create_default_config(tmp_path: Path, monkeypatch):
 
 def test_load_config_creates_default(tmp_path: Path, monkeypatch):
     cfg_path = tmp_path / "config.json"
-    monkeypatch.setattr(main, "CONFIG_FILE", cfg_path)
+    monkeypatch.setattr(config_mod, "CONFIG_FILE", str(cfg_path))
 
-    cfg = main.load_config()
+    cfg = config_mod.load_config()
     assert cfg_path.exists()
     assert isinstance(cfg, dict)
 
@@ -39,7 +44,7 @@ def test_load_config_creates_default(tmp_path: Path, monkeypatch):
 
 def test_sanitize_folder_name_removes_illegal():
     name = 'Manga:Name<>?*/"'
-    cleaned = main.sanitize_folder_name(name)
+    cleaned = utils_mod.sanitize_folder_name(name)
 
     illegal = '<>:"/\\|?*'
     assert all(c not in cleaned for c in illegal)
@@ -51,21 +56,21 @@ def test_sanitize_folder_name_removes_illegal():
 
 def test_extract_manga_name_from_url():
     url = "https://weebcentral.com/manga/one-piece/001.png"
-    assert main.extract_manga_name_from_url(url) == "one piece"
+    assert utils_mod.extract_manga_name_from_url(url) == "one piece"
 
 
 def test_get_slug_and_pretty():
-    slug, pretty = main.get_slug_and_pretty("My Hero Academia")
+    slug, pretty = utils_mod.get_slug_and_pretty("My Hero Academia")
     assert slug == "My-Hero-Academia"
     assert pretty == "My Hero Academia"
 
-    slug2, pretty2 = main.get_slug_and_pretty("https://site.com/manga/naruto/")
+    slug2, pretty2 = utils_mod.get_slug_and_pretty("https://site.com/manga/naruto/")
     assert "naruto" in slug2.lower()
     assert "naruto" in pretty2.lower()
 
 
 def test_get_slug_and_pretty_collapses_spaces():
-    slug, pretty = main.get_slug_and_pretty(" My   Hero   Academia ")
+    slug, pretty = utils_mod.get_slug_and_pretty(" My   Hero   Academia ")
     assert slug == "My-Hero-Academia"
     assert pretty == "My Hero Academia"
 
@@ -80,7 +85,7 @@ def test_create_cbz_for_all(tmp_path: Path):
     (manga_folder / "page1.png").write_bytes(b"dummy")
     (manga_folder / "page2.png").write_bytes(b"dummy")
 
-    main.create_cbz_for_all(manga_folder)
+    create_cbz_for_all(str(manga_folder))
 
     cbz_path = manga_folder / "One Piece.cbz"
     assert cbz_path.exists()
@@ -95,7 +100,7 @@ def test_create_cbz_skips_when_no_files(tmp_path: Path):
     empty = tmp_path / "Empty Manga"
     empty.mkdir()
 
-    main.create_cbz_for_all(empty)
+    create_cbz_for_all(str(empty))
     assert not any(p.suffix == ".cbz" for p in empty.iterdir())
 
 
@@ -106,7 +111,7 @@ def test_safe_delete_folder(tmp_path: Path):
     file = tmp_path / "dummy.txt"
     file.write_text("abc", encoding="utf-8")
 
-    main.safe_delete_folder(tmp_path)
+    utils_mod.safe_delete_folder(str(tmp_path))
 
     assert not tmp_path.exists()
 
@@ -116,39 +121,34 @@ def test_safe_delete_folder(tmp_path: Path):
 
 def test_extract_manga_uuid_valid():
     url = "https://mangadex.org/title/123e4567-e89b-12d3-a456-426614174000/foobar"
-    assert main.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
+    assert mangadex_mod.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
 
 
 def test_extract_manga_uuid_invalid():
     url = "https://mangadex.org/chapter/abcdef"
-    assert main.extract_manga_uuid(url) is None
+    assert mangadex_mod.extract_manga_uuid(url) is None
 
 
 @pytest.mark.asyncio
 async def test_get_manga_name_from_md_fallback(monkeypatch):
-    monkeypatch.setattr(main, "extract_manga_uuid", lambda _: None)
+    monkeypatch.setattr(mangadex_mod, "extract_manga_uuid", lambda _: None)
 
     url = "https://mangadex.org/title/some"
-    result = await main.get_manga_name_from_md(url, lang="jp")
+    result = await mangadex_mod.get_manga_name_from_md(url, lang="jp")
 
-    assert result == main.extract_manga_name_from_url(url)
+    assert result == utils_mod.extract_manga_name_from_url(url)
 
 
 # ---------- DOWNLOAD ERROR HANDLING ----------
 
 
 @pytest.mark.asyncio
-async def test_download_image_http_error(monkeypatch, tmp_path: Path):
+async def test_download_image_http_error(tmp_path: Path):
     class DummyResp:
         status = 400
 
         def raise_for_status(self):
-            raise aiohttp.ClientResponseError(
-                request_info=None,
-                history=None,
-                status=400,
-                message="bad",
-            )
+            raise aiohttp.ClientError("bad")
 
         async def read(self):
             return b"dummy"
@@ -160,20 +160,13 @@ async def test_download_image_http_error(monkeypatch, tmp_path: Path):
             pass
 
     class DummySession:
-        async def get(self, *args, **kwargs):
+        def get(self, *args, **kwargs):
             return DummyResp()
 
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-    monkeypatch.setattr(aiohttp, "ClientSession", lambda *a, **k: DummySession())
-
-    msg = await main.download_image(
+    msg = await download_image(
         "http://example.com/x.png",
-        tmp_path,
+        str(tmp_path),
+        session=DummySession(),
     )
 
     assert "Failed" in msg or "error" in msg.lower()
