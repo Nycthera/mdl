@@ -38,6 +38,20 @@ def set_stop_signal(value: bool) -> None:
     stop_signal = value
 
 
+async def _chapter_exists(
+    session: aiohttp.ClientSession,
+    manga_name: str,
+    chapter_label: str,
+    base_urls: List[str],
+) -> bool:
+    """Return whether a chapter has at least one page on any configured source."""
+    check_tasks = [
+        url_exists(session, f"{base}{manga_name}/{chapter_label}-001.png")
+        for base in base_urls
+    ]
+    return any(await asyncio.gather(*check_tasks))
+
+
 async def gather_all_urls(
     manga_name: str,
     start_chapter: int = 1,
@@ -50,7 +64,7 @@ async def gather_all_urls(
     """Gather all available page URLs for a manga."""
     urls_to_download = []
     folder_base = folder_base or sanitize_folder_name(manga_name)
-    
+
     if not CLEAN_OUTPUT:
         console.print(f"[yellow]Gathering pages for {manga_name}...[/]")
 
@@ -66,12 +80,9 @@ async def gather_all_urls(
                 break
 
             chapter_str = f"{chapter:04d}"
-            check_tasks = [
-                url_exists(session, f"{base}{manga_name}/{chapter_str}-001.png")
-                for base in BASE_URLS
-            ]
-            results = await asyncio.gather(*check_tasks)
-            found_any = any(results)
+            found_any = await _chapter_exists(
+                session, manga_name, chapter_str, BASE_URLS
+            )
 
             if found_any:
                 found_urls, chapter_folder = await _collect_chapter_urls_for_download(
@@ -89,40 +100,38 @@ async def gather_all_urls(
                     console.print(
                         f"[green]Chapter {chapter_str}: {len(found_urls)} pages found[/]"
                     )
-            else:
-                # Fallback: look for decimal chapters like 0001.5 when 0001 is missing
-                decimal_found_any = False
-                for dec in range(1, max_decimals + 1):
-                    chapter_decimal_str = f"{chapter_str}.{dec}"
-                    first_page_url = (
-                        f"{BASE_URLS[0]}{manga_name}/{chapter_decimal_str}-001.png"
-                    )
-                    if await url_exists(session, first_page_url):
-                        decimal_found_any = True
-                        found_urls, chapter_folder = await _collect_chapter_urls_for_download(
-                            manga_name,
-                            chapter_decimal_str,
-                            start_page,
-                            max_pages,
-                            folder_base,
-                            workers,
-                            session,
-                            BASE_URLS,
-                        )
-                        urls_to_download.extend(
-                            (url, chapter_folder) for url in found_urls
-                        )
-                        if not CLEAN_OUTPUT:
-                            console.print(
-                                f"[green]Chapter {chapter_decimal_str}: {len(found_urls)} pages found[/]"
-                            )
 
-                if not decimal_found_any:
-                    if not CLEAN_OUTPUT:
-                        console.print(
-                            f"[red]Chapter {chapter_str} not found. Stopping.[/]"
-                        )
-                    break
+            decimal_found_any = False
+            for dec in range(1, max_decimals + 1):
+                chapter_decimal_str = f"{chapter_str}.{dec}"
+                if not await _chapter_exists(
+                    session, manga_name, chapter_decimal_str, BASE_URLS
+                ):
+                    continue
+
+                decimal_found_any = True
+                found_urls, chapter_folder = await _collect_chapter_urls_for_download(
+                    manga_name,
+                    chapter_decimal_str,
+                    start_page,
+                    max_pages,
+                    folder_base,
+                    workers,
+                    session,
+                    BASE_URLS,
+                )
+                urls_to_download.extend((url, chapter_folder) for url in found_urls)
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[green]Chapter {chapter_decimal_str}: {len(found_urls)} pages found[/]"
+                    )
+
+            if not found_any and not decimal_found_any:
+                if not CLEAN_OUTPUT:
+                    console.print(
+                        f"[red]Chapter {chapter_str} not found. Stopping.[/]"
+                    )
+                break
 
             chapter += 1
 

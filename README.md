@@ -5,7 +5,7 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version 3.4.0](https://img.shields.io/badge/version-3.4.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
+[![Version 3.5.0](https://img.shields.io/badge/version-3.5.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
 
 ## 📚 Table of Contents
 
@@ -14,6 +14,7 @@
 - [Installation](#installation)
 - [Usage](#-usage)
 - [Configuration](#configuration)
+- [DB Auto-Update](#-db-auto-update)
 - [Architecture](#architecture)
 - [Contributing](#-contributing)
 
@@ -145,6 +146,9 @@ python main.py -M "demon-slayer" --start-chapter 50 --start-page 1
 # Clean output mode (no progress bars, summary only)
 python main.py -M "jujutsu-kaisen" --clean-output
 
+# Enable developer debug logs
+python main.py -M "jujutsu-kaisen" --dev
+
 # MangaDex with specific language
 python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
 ```
@@ -155,12 +159,28 @@ python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
 # Update all dependencies
 python main.py --update
 
+# Check all manga tracked in SQLite and download new chapters
+python main.py --auto-update-db
+
+# DB auto-update with developer debug logs
+python main.py --auto-update-db --dev
+
 # Show credits and attribution
 python main.py --credits
 
 # Display version
 python main.py --version
 ```
+
+## 🤖 DB Auto-Update
+
+Use the database as your tracking source to fetch updates for previously downloaded manga:
+
+```bash
+python main.py --auto-update-db
+```
+
+Detailed guide: [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md)
 
 ### Configuration
 
@@ -379,4 +399,4 @@ See [LICENSE](LICENSE) for full text.
 
 **Made with ❤️ by [Nycthera](https://github.com/Nycthera)**
 
-**Latest Version**: 3.4.0 | **Updated**: March 2026 | **Python 3.13+**
+**Latest Version**: 3.5.0 | **Updated**: March 2026 | **Python 3.13+**

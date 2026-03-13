@@ -39,5 +39,5 @@ test.py
 # Custom manga output folders
 **/*.cbz
 
-# to do files
-todo.md
+# Database files
+*.db

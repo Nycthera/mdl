@@ -11,15 +11,13 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src import __version__ as __version__
 from src.cli import parse_args
 from src.config import load_config, save_config
-from src.config import CONFIG_FILE as CONFIG_FILE
 from src.utils import validate_manga_input, get_slug_and_pretty
-from src.utils import Colors as Colors, cprint as cprint
 from src.downloader import (
     download_all_pages,
     set_clean_output as set_downloader_clean_output,
+    set_dev_mode as set_downloader_dev_mode,
     set_stop_signal as set_downloader_stop_signal,
 )
 from src.cbz import create_cbz_for_all, set_clean_output as set_cbz_clean_output
@@ -38,12 +36,18 @@ from src.scrapers.weebcentral import (
     set_clean_output as set_weeb_clean_output,
 )
 from src.system_utils import update, credits
+from src.database.manga_db import (
+    get_tracked_manga,
+    set_clean_output as set_db_clean_output,
+    set_dev_mode as set_db_dev_mode,
+)
 
 console = Console()
 
 # Global state
 stop_signal = False
 CLEAN_OUTPUT = False
+DEV_MODE = False
 
 
 def set_global_clean_output(value: bool) -> None:
@@ -55,6 +59,7 @@ def set_global_clean_output(value: bool) -> None:
     set_generic_clean_output(value)
     set_md_clean_output(value)
     set_weeb_clean_output(value)
+    set_db_clean_output(value)
 
 
 def set_global_stop_signal(value: bool) -> None:
@@ -64,6 +69,14 @@ def set_global_stop_signal(value: bool) -> None:
     set_downloader_stop_signal(value)
     set_generic_stop_signal(value)
     set_md_stop_signal(value)
+
+
+def set_global_dev_mode(value: bool) -> None:
+    """Set developer debug mode globally across modules."""
+    global DEV_MODE
+    DEV_MODE = value
+    set_downloader_dev_mode(value)
+    set_db_dev_mode(value)
 
 
 def print_clean_summary(
@@ -98,6 +111,86 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 
+def _calculate_resume_chapter(latest_local: float) -> int:
+    """Pick a safe chapter to resume from when checking for updates.
+
+    We start from the integer part so decimal chapters after that point are not skipped.
+    """
+    return max(1, int(latest_local))
+
+
+async def _auto_update_from_db(
+    workers: int,
+    start_page: int,
+    max_pages: int,
+    cbz_flag: bool,
+) -> None:
+    """Process all tracked manga and fetch only new chapters."""
+    tracked = get_tracked_manga()
+    if not tracked:
+        if not CLEAN_OUTPUT:
+            console.print("[yellow]No tracked manga found in database.[/]")
+        return
+
+    if not CLEAN_OUTPUT:
+        console.print(
+            f"[bold cyan]DB auto-update: checking {len(tracked)} tracked manga[/]"
+        )
+
+    processed = 0
+    updated = 0
+
+    for item in tracked:
+        if stop_signal:
+            break
+
+        manga_name = str(item["manga_name"])
+        latest_local = float(item["latest_chapter_local"])
+        start_chapter = _calculate_resume_chapter(latest_local)
+
+        if not CLEAN_OUTPUT:
+            console.print(
+                f"[cyan]Checking '{manga_name}' from chapter {start_chapter} (db latest={latest_local})[/]"
+            )
+
+        slug, pretty_name = get_slug_and_pretty(manga_name)
+        urls_to_download = await gather_all_urls(
+            slug,
+            start_chapter=start_chapter,
+            start_page=start_page,
+            max_pages=max_pages,
+            max_decimals=10,
+            workers=workers,
+            folder_base=pretty_name,
+        )
+
+        processed += 1
+        if not urls_to_download:
+            if not CLEAN_OUTPUT:
+                console.print(f"[yellow]No new pages for '{manga_name}'.[/]")
+            continue
+
+        await download_all_pages(
+            urls_to_download, max_workers=workers, manga_name=pretty_name
+        )
+        updated += 1
+
+        if cbz_flag and not stop_signal:
+            if os.path.isdir(pretty_name) and any(
+                f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
+            ):
+                cbz_created_path = create_cbz_for_all(pretty_name)
+                if cbz_created_path and not CLEAN_OUTPUT:
+                    console.print(
+                        f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
+                    )
+
+    if not CLEAN_OUTPUT:
+        console.print(
+            f"[bold cyan]DB auto-update complete:[/] checked={processed}, updated={updated}"
+        )
+
+
 # ============================================================================
 # MAIN FUNCTION
 # ============================================================================
@@ -115,10 +208,13 @@ async def main():
     cbz_flag = args.cbz or config.get("cbz", True)
     md_lang = args.md_lang or config.get("md_language", "en")
     update_flag = args.update or config.get("update", False)
+    auto_update_db_flag = args.auto_update_db
+    dev_flag = args.dev
     clean_flag = args.clean_output or config.get("clean_output", False)
     credits_flag = args.credits
 
     # Configure output mode globally
+    set_global_dev_mode(bool(dev_flag))
     set_global_clean_output(bool(clean_flag))
 
     if update_flag:
@@ -127,6 +223,15 @@ async def main():
 
     if credits_flag:
         credits(show=True)
+        return
+
+    if auto_update_db_flag:
+        await _auto_update_from_db(
+            workers=workers,
+            start_page=start_page,
+            max_pages=max_pages,
+            cbz_flag=cbz_flag,
+        )
         return
 
     if not config.get("credits_shown", False):
@@ -169,7 +274,7 @@ async def main():
             start_chapter=1,
             start_page=start_page,
             max_pages=max_pages,
-            max_decimals=50,
+            max_decimals=10,
             workers=workers,
             folder_base=pretty_name,
         )
@@ -210,7 +315,7 @@ async def main():
         start_chapter=start_chapter,
         start_page=start_page,
         max_pages=max_pages,
-        max_decimals=50,
+        max_decimals=10,
         workers=workers,
         folder_base=pretty_name,
     )

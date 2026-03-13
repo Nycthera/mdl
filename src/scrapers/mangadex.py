@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlparse
 
@@ -10,6 +11,7 @@ from rich.console import Console
 
 from src.downloader import download_all_pages
 from src.cbz import create_cbz_for_all
+from src.database.manga_db import record_download
 from src.rate_limiter import rate_limiter_athome
 from src.utils import sanitize_folder_name
 
@@ -192,12 +194,20 @@ async def download_md_chapters(
 
         total_pages_downloaded = 0
         total_chapters_downloaded = 0
+        latest_chapter_local = 0.0
+        latest_chapter_from_mangadex = 0.0
 
         for chapter in chapters:
             attr = chapter.get("attributes", {})
             chapter_num = attr.get("chapter", "Unknown")
             chapter_title = attr.get("title", "")
             chap_id = chapter.get("id")
+            chapter_match = re.search(r"(\d+(?:\.\d+)?)", str(chapter_num))
+            if chapter_match:
+                chapter_val = float(chapter_match.group(1))
+                latest_chapter_from_mangadex = max(
+                    latest_chapter_from_mangadex, chapter_val
+                )
 
             # Subfolder per chapter
             chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
@@ -220,11 +230,16 @@ async def download_md_chapters(
 
             urls_to_download = [(url, chapter_folder) for url in images]
             await download_all_pages(
-                urls_to_download, max_workers=10, manga_name=manga_name_clean
+                urls_to_download,
+                max_workers=10,
+                manga_name=manga_name_clean,
+                track_to_db=False,
             )
 
             total_pages_downloaded += len(images)
             total_chapters_downloaded += 1
+            if chapter_match:
+                latest_chapter_local = max(latest_chapter_local, chapter_val)
 
             if not os.listdir(chapter_folder):
                 if not CLEAN_OUTPUT:
@@ -251,3 +266,10 @@ async def download_md_chapters(
             if cbz_path:
                 msg += f", cbz='{cbz_path}'"
             print(msg)
+
+        if total_pages_downloaded > 0:
+            record_download(
+                manga_name=manga_name_clean,
+                latest_chapter_local=latest_chapter_local,
+                latest_chapter_from_mangadex=latest_chapter_from_mangadex,
+            )

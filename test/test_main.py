@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import importlib
 import json
+import sqlite3
 import zipfile
 from pathlib import Path
 
@@ -11,8 +13,18 @@ import aiohttp
 import src.config as config_mod
 import src.utils as utils_mod
 from src.cbz import create_cbz_for_all
+from src.database.manga_db import (
+    ensure_schema,
+    infer_latest_chapter_from_folders,
+    get_tracked_manga,
+    record_download,
+    record_download_from_folders,
+)
+import main as app_main
 import src.scrapers.mangadex as mangadex_mod
-from src.downloader import download_image
+import src.database.manga_db as manga_db_mod
+import src.scrapers.generic as generic_mod
+from src.downloader import download_image, _get_trackable_chapter_folders
 
 
 # ---------- CONFIG TESTS ----------
@@ -170,3 +182,231 @@ async def test_download_image_http_error(tmp_path: Path):
     )
 
     assert "Failed" in msg or "error" in msg.lower()
+
+
+# ---------- SQLITE TRACKING ----------
+
+
+def test_record_download_insert_and_update(tmp_path: Path):
+    db_path = tmp_path / "manga_collection.db"
+
+    record_download(
+        manga_name="Solo Leveling",
+        latest_chapter_local=12.0,
+        latest_chapter_from_mangadex=12.5,
+        db_path=str(db_path),
+    )
+
+    with sqlite3.connect(str(db_path)) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT id, manga_name, latest_chapter_local, latest_chapter_from_mangadex FROM manga_data"
+        )
+        rows = cursor.fetchall()
+
+    assert len(rows) == 1
+    assert rows[0][0] == 1
+    assert rows[0][1] == "Solo Leveling"
+    assert rows[0][2] == 12
+    assert rows[0][3] == 12.5
+
+    record_download(
+        manga_name="Solo Leveling",
+        latest_chapter_local=13.0,
+        latest_chapter_from_mangadex=13.0,
+        db_path=str(db_path),
+    )
+
+    with sqlite3.connect(str(db_path)) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT id, manga_name, latest_chapter_local, latest_chapter_from_mangadex FROM manga_data"
+        )
+        rows_after = cursor.fetchall()
+
+    assert len(rows_after) == 1
+    assert rows_after[0][0] == 1
+    assert rows_after[0][2] == 13
+    assert rows_after[0][3] == 13
+
+
+def test_default_db_path_expands_user_and_env(monkeypatch, tmp_path: Path):
+    db_dir = tmp_path / "db-home"
+    db_dir.mkdir()
+    monkeypatch.setenv("HOME", str(db_dir))
+    monkeypatch.setenv("MDL_DB_NAME", "expanded.db")
+    monkeypatch.setenv("MANGA_DB_PATH", "~/$MDL_DB_NAME")
+
+    reloaded = importlib.reload(manga_db_mod)
+
+    assert reloaded.DEFAULT_DB_PATH == str((db_dir / "expanded.db").resolve())
+
+
+def test_ensure_schema_migrates_legacy_table_and_dedupes(tmp_path: Path):
+    db_path = tmp_path / "manga_collection.db"
+    with sqlite3.connect(str(db_path)) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE manga_data (
+                id INTEGER NOT NULL,
+                manga_name TEXT NOT NULL,
+                date_last_chcked NUMERIC NOT NULL,
+                latest_chapter_local NUMERIC NOT NULL,
+                latest_chapter_from_mangadex NUMERIC NOT NULL
+            )
+            """
+        )
+        cursor.executemany(
+            "INSERT INTO manga_data VALUES (?, ?, ?, ?, ?)",
+            [
+                (1, "Solo Leveling", 100, 7.0, 7.0),
+                (2, "Solo Leveling", 200, 7.5, 7.5),
+                (3, "Dandadan", 150, 3.0, 3.0),
+            ],
+        )
+        connection.commit()
+
+    ensure_schema(str(db_path))
+
+    with sqlite3.connect(str(db_path)) as connection:
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA table_info(manga_data)")
+        columns = [row[1] for row in cursor.fetchall()]
+        cursor.execute(
+            "SELECT manga_name, date_last_checked, latest_chapter_local FROM manga_data ORDER BY manga_name"
+        )
+        rows = cursor.fetchall()
+
+    assert "date_last_checked" in columns
+    assert "date_last_chcked" not in columns
+    assert rows == [
+        ("Dandadan", 150, 3),
+        ("Solo Leveling", 200, 7.5),
+    ]
+
+
+def test_infer_latest_chapter_from_folders():
+    folders = [
+        "My Manga/Chapter_0001",
+        "My Manga/Chapter_0012.5",
+        "My Manga/Chapter_0008",
+    ]
+    assert infer_latest_chapter_from_folders(folders) == 12.5
+
+
+def test_infer_latest_chapter_ignores_manga_title_digits():
+    folders = [
+        "86/chapter_0001",
+        "86/chapter_0010",
+        "86/chapter_0002.5",
+    ]
+    assert infer_latest_chapter_from_folders(folders) == 10.0
+
+
+def test_record_download_from_folders(tmp_path: Path):
+    db_path = tmp_path / "manga_collection.db"
+    record_download_from_folders(
+        manga_name="86",
+        chapter_folders=["86/chapter_0001", "86/chapter_0007.5"],
+        db_path=str(db_path),
+    )
+
+    with sqlite3.connect(str(db_path)) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT manga_name, latest_chapter_local, latest_chapter_from_mangadex FROM manga_data"
+        )
+        row = cursor.fetchone()
+
+    assert row is not None
+    assert row[0] == "86"
+    assert row[1] == 7.5
+    assert row[2] == 7.5
+
+
+def test_get_tracked_manga(tmp_path: Path):
+    db_path = tmp_path / "manga_collection.db"
+    record_download("A", 2.0, 2.0, db_path=str(db_path))
+    record_download("B", 5.5, 5.5, db_path=str(db_path))
+
+    tracked = get_tracked_manga(db_path=str(db_path))
+    assert len(tracked) == 2
+    assert tracked[0]["manga_name"] == "A"
+    assert tracked[1]["manga_name"] == "B"
+
+
+def test_calculate_resume_chapter():
+    assert app_main._calculate_resume_chapter(0.0) == 1
+    assert app_main._calculate_resume_chapter(7.0) == 7
+    assert app_main._calculate_resume_chapter(7.5) == 7
+
+
+def test_get_trackable_chapter_folders_stops_at_first_incomplete_chapter():
+    urls_to_download = [
+        ("u1", "Series/chapter_0007"),
+        ("u2", "Series/chapter_0007"),
+        ("u3", "Series/chapter_0007.5"),
+        ("u4", "Series/chapter_0007.5"),
+        ("u5", "Series/chapter_0008"),
+    ]
+    page_results = {
+        ("u1", "Series/chapter_0007"): "Saved as page1",
+        ("u2", "Series/chapter_0007"): "Already downloaded: page2",
+        ("u3", "Series/chapter_0007.5"): "Saved as page3",
+        ("u4", "Series/chapter_0007.5"): "Failed to download page4",
+        ("u5", "Series/chapter_0008"): "Saved as page5",
+    }
+
+    assert _get_trackable_chapter_folders(urls_to_download, page_results) == [
+        "Series/chapter_0007",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_gather_all_urls_probes_decimal_chapters_after_integer(monkeypatch):
+    class DummyClientSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    async def fake_url_exists(session, url):
+        return url.endswith("/0007-001.png") or url.endswith("/0007.5-001.png")
+
+    async def fake_collect(
+        manga_name,
+        chapter_label,
+        start_page,
+        max_pages,
+        folder_base,
+        workers,
+        session,
+        base_urls,
+    ):
+        return [f"https://example/{chapter_label}-001.png"], f"{folder_base}/chapter_{chapter_label}"
+
+    monkeypatch.setattr(generic_mod.aiohttp, "ClientSession", DummyClientSession)
+    monkeypatch.setattr(generic_mod, "url_exists", fake_url_exists)
+    monkeypatch.setattr(generic_mod, "_collect_chapter_urls_for_download", fake_collect)
+    monkeypatch.setattr(generic_mod, "BASE_URLS", ["https://example/"])
+    monkeypatch.setattr(generic_mod, "stop_signal", False)
+
+    urls = await generic_mod.gather_all_urls(
+        "series",
+        start_chapter=7,
+        start_page=1,
+        max_pages=1,
+        max_decimals=5,
+        workers=1,
+        folder_base="Series",
+    )
+
+    assert urls == [
+        ("https://example/0007-001.png", "Series/chapter_0007"),
+        ("https://example/0007.5-001.png", "Series/chapter_0007.5"),
+    ]
