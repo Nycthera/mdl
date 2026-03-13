@@ -110,7 +110,7 @@ def ensure_schema(db_path: str = DEFAULT_DB_PATH) -> None:
             CREATE TABLE IF NOT EXISTS manga_data (
                 id INTEGER NOT NULL,
                 manga_name TEXT NOT NULL,
-                date_last_chcked NUMERIC NOT NULL,
+                date_last_checked NUMERIC NOT NULL,
                 latest_chapter_local NUMERIC NOT NULL,
                 latest_chapter_from_mangadex NUMERIC NOT NULL
             )
