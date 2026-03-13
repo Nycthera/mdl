@@ -67,7 +67,7 @@ Each module handles its own errors appropriately:
 
 - Network errors are retried with exponential backoff
 - Invalid input is validated early
-- Playwr ight failures gracefully fall back to alternative browsers
+- Playwright failures gracefully fall back to alternative browsers
 
 ## Usage Flow
 

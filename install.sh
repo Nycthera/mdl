@@ -52,25 +52,12 @@ cd "$base_path"
 
 # -------- CLI Installation --------
 echo "Installing CLI to /usr/local/bin/mdl..."
-mdl_script=$(cat <<'MDLSCRIPT'
-#!/bin/bash
-# Manga Downloader CLI wrapper
-mdl_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-if [ ! -f "$mdl_dir/main.py" ]; then
-    mdl_dir="/Users/chris/Downloads/mdl"  # Fallback to default location
-fi
-"$mdl_dir/venv/bin/python3" "$mdl_dir/main.py" "$@"
-MDLSCRIPT
-)
 
 # Create /usr/local/bin directory if needed and install CLI
 sudo bash -c "mkdir -p /usr/local/bin && cat > /usr/local/bin/mdl <<'EOF'
 #!/bin/bash
 # Manga Downloader CLI wrapper
-mdl_dir=\"$(cd \"$(dirname \"\${BASH_SOURCE[0]}\")\" && pwd)/../Downloads/mdl\"
-if [ ! -f \"\$mdl_dir/venv/bin/python3\" ]; then
-    mdl_dir=\"/Users/chris/Downloads/mdl\"
-fi
+mdl_dir=\"$base_path\"
 \"\$mdl_dir/venv/bin/python3\" \"\$mdl_dir/main.py\" \"\$@\"
 EOF
 chmod +x /usr/local/bin/mdl"

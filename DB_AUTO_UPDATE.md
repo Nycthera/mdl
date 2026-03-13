@@ -18,7 +18,7 @@ For each tracked row in `manga_data`, MDL:
 2. Picks a safe resume chapter (integer part of latest local chapter)
 3. Scans for available pages from that point onward
 4. Downloads only missing files
-5. Updates DB metadata (`date_last_chcked`, latest chapters)
+5. Updates DB metadata (`date_last_checked`, latest chapters)
 
 ## Database Path
 
@@ -57,7 +57,7 @@ sqlite3 ~/.config/manga_downloader/manga_collection.db "
 UPDATE manga_data
 SET latest_chapter_local = 1,
     latest_chapter_from_mangadex = 1,
-    date_last_chcked = strftime('%s','now') - 86400
+    date_last_checked = strftime('%s','now') - 86400
 WHERE manga_name = 'one piece';
 "
 
@@ -65,7 +65,7 @@ python3 main.py --auto-update-db
 
 sqlite3 ~/.config/manga_downloader/manga_collection.db "
 SELECT manga_name, latest_chapter_local, latest_chapter_from_mangadex,
-       datetime(date_last_chcked,'unixepoch')
+       datetime(date_last_checked,'unixepoch')
 FROM manga_data
 WHERE manga_name = 'one piece';
 "

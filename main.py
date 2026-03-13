@@ -159,7 +159,7 @@ async def _auto_update_from_db(
             start_chapter=start_chapter,
             start_page=start_page,
             max_pages=max_pages,
-            max_decimals=50,
+            max_decimals=10,
             workers=workers,
             folder_base=pretty_name,
         )
@@ -274,7 +274,7 @@ async def main():
             start_chapter=1,
             start_page=start_page,
             max_pages=max_pages,
-            max_decimals=50,
+            max_decimals=10,
             workers=workers,
             folder_base=pretty_name,
         )
@@ -315,7 +315,7 @@ async def main():
         start_chapter=start_chapter,
         start_page=start_page,
         max_pages=max_pages,
-        max_decimals=50,
+        max_decimals=10,
         workers=workers,
         folder_base=pretty_name,
     )
