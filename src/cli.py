@@ -29,6 +29,16 @@ def parse_args():
     )
     parser.add_argument("--update", action="store_true", help="Update the application")
     parser.add_argument(
+        "--auto-update-db",
+        action="store_true",
+        help="Check all tracked manga in the database and download new chapters",
+    )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Enable developer debug logs",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",

@@ -64,6 +64,7 @@
 ### Configuration Management
 
 - **JSON-based config** - Stored in `~/.config/manga_downloader/config.json`
+- **SQLite tracking DB** - Stored in `~/.config/manga_downloader/manga_collection.db`
 - **Default values** - Automatic creation if config doesn't exist
 - **User preferences** - Persistent settings across runs
 

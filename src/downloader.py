@@ -15,6 +15,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+from src.database.manga_db import record_download_from_folders
 from src.utils import Colors, _loop_time, _cancel_pending_tasks
 
 console = Console()
@@ -22,12 +23,19 @@ console = Console()
 # Global state for interruption handling
 stop_signal = False
 CLEAN_OUTPUT = False
+DEV_MODE = False
 
 
 def set_clean_output(value: bool) -> None:
     """Set the clean output mode globally."""
     global CLEAN_OUTPUT
     CLEAN_OUTPUT = value
+
+
+def set_dev_mode(value: bool) -> None:
+    """Set developer debug mode globally."""
+    global DEV_MODE
+    DEV_MODE = value
 
 
 def set_stop_signal(value: bool) -> None:
@@ -87,8 +95,12 @@ async def download_all_pages(
     urls_to_download: List[Tuple[str, str]],
     max_workers: int = 10,
     manga_name: str = "manga",
+    track_to_db: bool = True,
 ) -> None:
-    """Download all pages with progress tracking."""
+    """Download all pages with progress tracking.
+
+    Set track_to_db=False when the caller will handle a single consolidated DB write.
+    """
     total_pages = len(urls_to_download)
     if total_pages == 0:
         return
@@ -147,3 +159,28 @@ async def download_all_pages(
                 if stop_signal:
                     await _cancel_pending_tasks(tasks)
                     break
+
+    if track_to_db and not stop_signal and urls_to_download:
+        try:
+            if DEV_MODE and not CLEAN_OUTPUT:
+                console.print(
+                    f"[bold blue][db][/bold blue] Triggering save from downloader for '{manga_name}'"
+                )
+            record_download_from_folders(
+                manga_name=manga_name,
+                chapter_folders=(folder for _, folder in urls_to_download),
+            )
+            if DEV_MODE and not CLEAN_OUTPUT:
+                console.print(
+                    f"[bold blue][db][/bold blue] Downloader save finished for '{manga_name}'"
+                )
+        except Exception:
+            # DB tracking should not block downloads.
+            if not CLEAN_OUTPUT:
+                console.print(
+                    f"{Colors.YELLOW}Warning: Could not write download metadata for {manga_name}{Colors.RESET}"
+                )
+    elif track_to_db and DEV_MODE and not stop_signal and not CLEAN_OUTPUT:
+        console.print(
+            f"[bold blue][db][/bold blue] Skipping save for '{manga_name}' because no pages were queued"
+        )

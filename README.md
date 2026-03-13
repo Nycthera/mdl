@@ -14,6 +14,7 @@
 - [Installation](#installation)
 - [Usage](#-usage)
 - [Configuration](#configuration)
+- [DB Auto-Update](#-db-auto-update)
 - [Architecture](#architecture)
 - [Contributing](#-contributing)
 
@@ -145,6 +146,9 @@ python main.py -M "demon-slayer" --start-chapter 50 --start-page 1
 # Clean output mode (no progress bars, summary only)
 python main.py -M "jujutsu-kaisen" --clean-output
 
+# Enable developer debug logs
+python main.py -M "jujutsu-kaisen" --dev
+
 # MangaDex with specific language
 python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
 ```
@@ -155,12 +159,28 @@ python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
 # Update all dependencies
 python main.py --update
 
+# Check all manga tracked in SQLite and download new chapters
+python main.py --auto-update-db
+
+# DB auto-update with developer debug logs
+python main.py --auto-update-db --dev
+
 # Show credits and attribution
 python main.py --credits
 
 # Display version
 python main.py --version
 ```
+
+## 🤖 DB Auto-Update
+
+Use the database as your tracking source to fetch updates for previously downloaded manga:
+
+```bash
+python main.py --auto-update-db
+```
+
+Detailed guide: [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md)
 
 ### Configuration
 
