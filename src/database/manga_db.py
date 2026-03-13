@@ -14,11 +14,31 @@ from rich.console import Console
 from src.config import get_config_path
 
 
-DEFAULT_DB_PATH = os.environ.get(
-    "MANGA_DB_PATH",
-    os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
+def _resolve_db_path(db_path: str) -> str:
+    """Expand user and environment markers in database paths."""
+    expanded = os.path.expandvars(os.path.expanduser(db_path))
+    return os.path.abspath(expanded)
+
+
+DEFAULT_DB_PATH = _resolve_db_path(
+    os.environ.get(
+        "MANGA_DB_PATH",
+        os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
+    )
 )
-LEGACY_DB_PATH = os.path.join(os.path.dirname(__file__), "manga_collection.db")
+LEGACY_DB_PATH = _resolve_db_path(
+    os.path.join(os.path.dirname(__file__), "manga_collection.db")
+)
+
+SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS manga_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    manga_name TEXT NOT NULL UNIQUE,
+    date_last_checked NUMERIC NOT NULL,
+    latest_chapter_local NUMERIC NOT NULL,
+    latest_chapter_from_mangadex NUMERIC NOT NULL
+)
+"""
 
 console = Console()
 CLEAN_OUTPUT = False
@@ -85,8 +105,67 @@ def infer_latest_chapter_from_folders(folders: Iterable[str]) -> float:
     return latest
 
 
+def _has_unique_index(cursor: sqlite3.Cursor, table_name: str, column_name: str) -> bool:
+    """Return whether a table has a unique index for the given column."""
+    cursor.execute(f"PRAGMA index_list({table_name})")
+    for _, index_name, is_unique, *_ in cursor.fetchall():
+        if not is_unique:
+            continue
+        cursor.execute(f"PRAGMA index_info({index_name})")
+        indexed_columns = [row[2] for row in cursor.fetchall()]
+        if indexed_columns == [column_name]:
+            return True
+    return False
+
+
+def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
+    """Return whether the manga_data table needs to be rebuilt."""
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    if cursor.fetchone() is None:
+        return False
+
+    cursor.execute("PRAGMA table_info(manga_data)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "date_last_checked" not in columns:
+        return True
+    return not _has_unique_index(cursor, "manga_data", "manga_name")
+
+
+def _migrate_schema(connection: sqlite3.Connection) -> None:
+    """Rebuild the manga_data table with the current schema and dedupe rows."""
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA table_info(manga_data)")
+    columns = {row[1] for row in cursor.fetchall()}
+    date_column = "date_last_checked"
+    if "date_last_checked" not in columns:
+        date_column = "date_last_chcked"
+
+    cursor.execute("ALTER TABLE manga_data RENAME TO manga_data_old")
+    cursor.execute(SCHEMA_SQL)
+    cursor.execute(
+        f"""
+        INSERT INTO manga_data (
+            manga_name,
+            date_last_checked,
+            latest_chapter_local,
+            latest_chapter_from_mangadex
+        )
+        SELECT
+            manga_name,
+            MAX(COALESCE({date_column}, 0)),
+            MAX(COALESCE(latest_chapter_local, 0)),
+            MAX(COALESCE(latest_chapter_from_mangadex, 0))
+        FROM manga_data_old
+        GROUP BY manga_name
+        """
+    )
+    cursor.execute("DROP TABLE manga_data_old")
+    connection.commit()
+
+
 def ensure_schema(db_path: str = DEFAULT_DB_PATH) -> None:
     """Ensure the manga tracking table exists."""
+    db_path = _resolve_db_path(db_path)
     db_dir = os.path.dirname(db_path)
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
@@ -105,17 +184,13 @@ def ensure_schema(db_path: str = DEFAULT_DB_PATH) -> None:
 
     with sqlite3.connect(db_path) as connection:
         cursor = connection.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS manga_data (
-                id INTEGER NOT NULL,
-                manga_name TEXT NOT NULL,
-                date_last_chcked NUMERIC NOT NULL,
-                latest_chapter_local NUMERIC NOT NULL,
-                latest_chapter_from_mangadex NUMERIC NOT NULL
-            )
-            """
-        )
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+        if cursor.fetchone() is None:
+            cursor.execute(SCHEMA_SQL)
+            connection.commit()
+        elif _schema_needs_migration(cursor):
+            _db_log("Migrating manga_data schema")
+            _migrate_schema(connection)
         connection.commit()
     _db_log("Schema check complete")
 
@@ -127,6 +202,7 @@ def record_download(
     db_path: str = DEFAULT_DB_PATH,
 ) -> None:
     """Insert or update a manga entry after a successful download."""
+    db_path = _resolve_db_path(db_path)
     _db_log(
         "Starting save "
         f"(name='{manga_name}', local={latest_chapter_local}, source={latest_chapter_from_mangadex})"
@@ -138,51 +214,25 @@ def record_download(
         _db_log("Connected to database")
         cursor = connection.cursor()
         cursor.execute(
-            "SELECT id FROM manga_data WHERE manga_name = ? ORDER BY id ASC LIMIT 1",
-            (manga_name,),
+            """
+            INSERT INTO manga_data (
+                manga_name,
+                date_last_checked,
+                latest_chapter_local,
+                latest_chapter_from_mangadex
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(manga_name) DO UPDATE SET
+                date_last_checked = excluded.date_last_checked,
+                latest_chapter_local = excluded.latest_chapter_local,
+                latest_chapter_from_mangadex = excluded.latest_chapter_from_mangadex
+            """,
+            (
+                manga_name,
+                checked_at,
+                latest_chapter_local,
+                latest_chapter_from_mangadex,
+            ),
         )
-        existing = cursor.fetchone()
-
-        if existing:
-            _db_log(f"Existing row found (id={existing[0]}), updating")
-            cursor.execute(
-                """
-                UPDATE manga_data
-                SET date_last_chcked = ?,
-                    latest_chapter_local = ?,
-                    latest_chapter_from_mangadex = ?
-                WHERE id = ?
-                """,
-                (
-                    checked_at,
-                    latest_chapter_local,
-                    latest_chapter_from_mangadex,
-                    existing[0],
-                ),
-            )
-        else:
-            _db_log("No existing row found, inserting")
-            cursor.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM manga_data")
-            next_id = cursor.fetchone()[0]
-            cursor.execute(
-                """
-                INSERT INTO manga_data (
-                    id,
-                    manga_name,
-                    date_last_chcked,
-                    latest_chapter_local,
-                    latest_chapter_from_mangadex
-                ) VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    next_id,
-                    manga_name,
-                    checked_at,
-                    latest_chapter_local,
-                    latest_chapter_from_mangadex,
-                ),
-            )
-            _db_log(f"Inserted new row id={next_id}")
         connection.commit()
     _db_log("Commit complete")
 
@@ -212,6 +262,7 @@ def record_download_from_folders(
 
 def get_tracked_manga(db_path: str = DEFAULT_DB_PATH) -> list[dict[str, float | str]]:
     """Return tracked manga records from the database."""
+    db_path = _resolve_db_path(db_path)
     ensure_schema(db_path)
     _db_log("Loading tracked manga list")
     with sqlite3.connect(db_path) as connection:
