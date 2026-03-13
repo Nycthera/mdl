@@ -5,7 +5,7 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version 3.4.0](https://img.shields.io/badge/version-3.4.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
+[![Version 3.5.0](https://img.shields.io/badge/version-3.5.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
 
 ## 📚 Table of Contents
 
@@ -399,4 +399,4 @@ See [LICENSE](LICENSE) for full text.
 
 **Made with ❤️ by [Nycthera](https://github.com/Nycthera)**
 
-**Latest Version**: 3.4.0 | **Updated**: March 2026 | **Python 3.13+**
+**Latest Version**: 3.5.0 | **Updated**: March 2026 | **Python 3.13+**

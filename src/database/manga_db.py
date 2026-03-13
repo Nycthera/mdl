@@ -170,15 +170,32 @@ def ensure_schema(db_path: str = DEFAULT_DB_PATH) -> None:
     if db_dir:
         os.makedirs(db_dir, exist_ok=True)
 
-    # One-time migration for users moving from the legacy in-repo DB path.
+    # One-time migration for users who previously stored their DB at the legacy
+    # in-repo location.  Only migrate if the source DB actually contains rows
+    # (skip empty/placeholder files shipped with the repo).
     if (
         db_path == DEFAULT_DB_PATH
         and not os.path.exists(db_path)
         and os.path.exists(LEGACY_DB_PATH)
         and os.path.abspath(LEGACY_DB_PATH) != os.path.abspath(db_path)
     ):
-        shutil.copy2(LEGACY_DB_PATH, db_path)
-        _db_log(f"Migrated legacy database from: {LEGACY_DB_PATH}")
+        # Only copy if the legacy DB has user data (non-empty table)
+        try:
+            with sqlite3.connect(LEGACY_DB_PATH) as _check_conn:
+                check_cur = _check_conn.cursor()
+                check_cur.execute(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='manga_data'"
+                )
+                has_table = check_cur.fetchone()[0] > 0
+                row_count = 0
+                if has_table:
+                    check_cur.execute("SELECT COUNT(*) FROM manga_data")
+                    row_count = check_cur.fetchone()[0]
+            if row_count > 0:
+                shutil.copy2(LEGACY_DB_PATH, db_path)
+                _db_log(f"Migrated legacy database from: {LEGACY_DB_PATH}")
+        except sqlite3.Error as exc:
+            _db_log(f"Failed to check legacy database, starting fresh: {exc}")
 
     _db_log(f"Ensuring schema at: {db_path}")
 
