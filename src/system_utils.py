@@ -8,11 +8,29 @@ import subprocess
 import sys
 from typing import List, Dict, Union
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+except Exception:  # ImportError and any other issues loading Rich
+    Console = None  # type: ignore[assignment]
+    Panel = None  # type: ignore[assignment]
+    Table = None  # type: ignore[assignment]
 
-console = Console()
+_RICH_AVAILABLE = Console is not None
+
+if _RICH_AVAILABLE:
+    console = Console()
+else:
+    class _PlainConsole:
+        """Minimal console fallback when Rich is unavailable."""
+
+        def print(self, *args, **kwargs) -> None:  # noqa: D401
+            # Ignore Rich-specific markup and styles; just print text.
+            text = " ".join(str(a) for a in args)
+            print(text)
+
+    console = _PlainConsole()
 
 
 def credits(show: bool = False) -> List[Dict[str, str]]:
@@ -39,19 +57,29 @@ def credits(show: bool = False) -> List[Dict[str, str]]:
     ]
 
     if show:
-        table = Table(title="Credits")
-        table.add_column("Name", style="cyan", no_wrap=True)
-        table.add_column("Category", style="magenta", no_wrap=True)
-        table.add_column("Description", style="white")
-        table.add_column("URL", style="green")
-        for item in entries:
-            table.add_row(
-                item["name"],
-                item["category"],
-                item["description"],
-                item["url"],
-            )
-        console.print(Panel.fit(table, border_style="cyan"))
+        if _RICH_AVAILABLE:
+            table = Table(title="Credits")
+            table.add_column("Name", style="cyan", no_wrap=True)
+            table.add_column("Category", style="magenta", no_wrap=True)
+            table.add_column("Description", style="white")
+            table.add_column("URL", style="green")
+            for item in entries:
+                table.add_row(
+                    item["name"],
+                    item["category"],
+                    item["description"],
+                    item["url"],
+                )
+            console.print(Panel.fit(table, border_style="cyan"))
+        else:
+            # Fallback plain-text credits when Rich is unavailable.
+            console.print("Credits:")
+            for item in entries:
+                console.print(
+                    f"- {item['name']} "
+                    f"({item['category']}): {item['description']} "
+                    f"[{item['url']}]"
+                )
 
     return entries
 
