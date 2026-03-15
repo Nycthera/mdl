@@ -58,14 +58,16 @@ def _check_command_exists(cmd: str, check_cmd: str) -> bool:
     """Check if a command is available in PATH."""
     try:
         subprocess.run(
-            check_cmd, 
-            shell=True, 
-            check=True, 
+            check_cmd,
+            shell=True,
+            check=True,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
         return True
     except subprocess.CalledProcessError:
+        # Use the `cmd` argument for clearer diagnostics while keeping behavior unchanged.
+        console.print(f"[yellow]Command not available in PATH: {cmd}[/]")
         return False
 
 
