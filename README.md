@@ -29,7 +29,7 @@
   
 - **⚡ Performance**
   - Async/await concurrency with configurable workers (1-50)
-  - Rate limiting with exponential backoff
+  - Rate limiting with linear backoff
   - Connection pooling for optimized network usage
   - Pages/second performance metrics
   
@@ -39,7 +39,7 @@
   - Clean JSON configuration management
   
 - **🛡️ Reliability**
-  - Automatic retry with exponential backoff
+  - Automatic retry with linear backoff
   - Graceful error handling
   - Support interruption handling (Ctrl+C)
   - Cross-platform compatibility (Windows, macOS, Linux)
