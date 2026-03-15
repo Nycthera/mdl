@@ -55,7 +55,7 @@ def extract_manga_name_from_url(manga_input: str) -> str:
 
 def sanitize_folder_name(name: str) -> str:
     """Remove illegal characters from folder/file names."""
-    # Replace illegal filesystem characters with underscore, but keep spaces
+    # Remove illegal filesystem characters entirely, but keep spaces
     cleaned = re.sub(r'[<>:"/\\|?*]', "", name)
     # Replace underscores/hyphens that were used as separators with spaces
     cleaned = cleaned.replace("_", " ")
