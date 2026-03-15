@@ -5,6 +5,7 @@ import os
 import re
 from typing import Optional, List, Dict, Any
 from urllib.parse import urlparse
+import uuid
 
 import aiohttp
 from rich.console import Console
@@ -42,7 +43,14 @@ def extract_manga_uuid(url: str) -> Optional[str]:
         path = urlparse(url).path.strip("/")
         parts = path.split("/")
         if len(parts) >= 2 and parts[0] == "title":
-            return parts[1]
+            candidate_id = parts[1]
+            try:
+                # Validate that the extracted ID is a proper UUID
+                uuid.UUID(candidate_id)
+                return candidate_id
+            except ValueError:
+                # Not a valid UUID; fall through to return None
+                pass
     except Exception:
         pass
     return None
