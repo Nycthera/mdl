@@ -205,10 +205,24 @@ def _install_cli_wrapper_unix(base_path: str, py_cmd: List[str]) -> bool:
     return True
 
 
+def _resolve_project_base_path() -> str:
+    """Resolve the MDL project root regardless of caller CWD."""
+    candidates = [
+        os.path.dirname(os.path.abspath(sys.argv[0])),
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ]
+
+    for candidate in candidates:
+        if os.path.exists(os.path.join(candidate, "requirements.txt")):
+            return candidate
+
+    return candidates[0]
+
+
 def update() -> None:
     """Update the application and its dependencies."""
     os_name = platform.system().lower()
-    base_path = os.getcwd()
+    base_path = _resolve_project_base_path()
     
     console.print(Panel.fit(
         f"[bold cyan]MDL Dependency Update[/]\n[yellow]Base path: {base_path}[/]",
