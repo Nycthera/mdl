@@ -1,56 +1,113 @@
 #!/bin/bash
 
-# -------- Base path --------
+set -euo pipefail
+
 base_path=$(pwd)
 echo "Base path is $base_path"
 
-# -------- Python setup --------
-echo "Setting up Python environment..."
-if ! command -v python3 &> /dev/null; then
+ask_yes_no() {
+    local prompt="$1"
+    local default="$2"
+    local answer
+    while true; do
+        if [ "$default" = "y" ]; then
+            read -r -p "$prompt [Y/n]: " answer
+        else
+            read -r -p "$prompt [y/N]: " answer
+        fi
+        answer=$(echo "${answer:-}" | tr '[:upper:]' '[:lower:]')
+        if [ -z "$answer" ]; then
+            answer="$default"
+        fi
+        case "$answer" in
+            y|yes) return 0 ;;
+            n|no) return 1 ;;
+            *) echo "Please answer y or n." ;;
+        esac
+    done
+}
+
+echo ""
+echo "=== MDL Install Selection ==="
+echo "1) User site-packages (no venv)"
+echo "2) Project venv (./venv)"
+read -r -p "Choose Python install mode [1/2] (default 1): " install_mode
+install_mode=${install_mode:-1}
+
+install_python_deps=false
+install_playwright=false
+install_node=false
+install_cli=false
+
+if ask_yes_no "Install Python dependencies" y; then install_python_deps=true; fi
+if ask_yes_no "Install Playwright browsers" y; then install_playwright=true; fi
+if ask_yes_no "Install API server (server/) Node dependencies" y; then install_node=true; fi
+if ask_yes_no "Install CLI wrapper (mdl)" y; then install_cli=true; fi
+
+if ! command -v python3 >/dev/null 2>&1; then
     echo "Error: python3 is not installed."
     exit 1
 fi
 
-# Create virtual environment if not exists
-if [ ! -d "$base_path/venv" ]; then
-    python3 -m venv venv
-    echo "Virtual environment created at $base_path/venv"
+run_py="python3"
+if [ "$install_mode" = "2" ]; then
+    if [ ! -d "$base_path/venv" ]; then
+        echo "Creating virtual environment..."
+        python3 -m venv "$base_path/venv"
+    fi
+    run_py="$base_path/venv/bin/python"
 fi
 
-# Activate venv
-source venv/bin/activate
+if [ "$install_python_deps" = true ]; then
+    if [ "$install_mode" = "2" ]; then
+        "$run_py" -m pip install --upgrade pip
+    fi
+    if [ "$install_mode" = "2" ]; then
+        "$run_py" -m pip install -r "$base_path/requirements.txt"
+    else
+        "$run_py" -m pip install --user -r "$base_path/requirements.txt"
+    fi
+fi
 
-# Auto-generate requirements.txt (only if missing)
-if [ ! -f "$base_path/requirements.txt" ]; then
-    echo "Generating requirements.txt..."
-    cat <<EOF > requirements.txt
-requests
-rich
-playwright
-playwright-stealth
-pytest
-aiohttp
-pytest-asyncio
+if [ "$install_playwright" = true ]; then
+    "$run_py" -m playwright install
+fi
+
+if [ "$install_node" = true ]; then
+    echo "Setting up API server (server/, Node.js, optional)..."
+    if [ -d "$base_path/server" ] && [ -f "$base_path/server/package.json" ]; then
+        if command -v npm >/dev/null 2>&1; then
+            (cd "$base_path/server" && npm install)
+        else
+            echo "Warning: npm not found. Skipping server/ dependency install."
+        fi
+    else
+        echo "server/ not found. Skipping Node.js setup."
+    fi
+fi
+
+if [ "$install_cli" = true ]; then
+    echo "Installing user-local CLI wrapper..."
+    user_bin="$HOME/.local/bin"
+    mkdir -p "$user_bin"
+
+    cat > "$user_bin/mdl" <<EOF
+#!/bin/bash
+exec "$run_py" "$base_path/main.py" "\$@"
 EOF
+    chmod +x "$user_bin/mdl"
 fi
 
-# Install Python dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-
-# Install Playwright browsers
-playwright install
-# -------- Node.js setup --------
-echo "Setting up Manga-API (Node.js)..."
-cd "$base_path/Manga-API" || exit
-if [ -f "package.json" ]; then
-    npm install
+echo ""
+echo "Installation complete!"
+if [ "$install_mode" = "2" ]; then
+    echo "Mode: venv ($base_path/venv)"
+    echo "Activate with: source venv/bin/activate"
 else
-    echo "Warning: package.json not found in Manga-API. Skipping npm install."
+    echo "Mode: user site-packages (no venv)"
 fi
-cd "$base_path"
-
-# -------- Finish --------
-echo "Installation complete."
-echo "To activate Python venv: source venv/bin/activate"
-echo "To start the Node server: cd Manga-API && npm start"
+if [ "$install_cli" = true ]; then
+    echo "CLI installed at: $HOME/.local/bin/mdl"
+    echo "If needed, add to PATH: export PATH=\"$HOME/.local/bin:\$PATH\""
+fi
+echo "Run: python main.py --help"

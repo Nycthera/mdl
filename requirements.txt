@@ -1,7 +1,21 @@
-requests
-rich
-playwright
-playwright-stealth
-pytest
-aiohttp
-pytest-asyncio
+# Manga Downloader - Python Dependencies
+# Last updated: 2026-03-07
+
+# HTTP & Async
+aiohttp>=3.8.0,<4.0.0
+requests>=2.31.0,<3.0.0
+
+# UI & Output
+rich>=13.5.0,<14.0.0
+
+# Browser Automation
+playwright>=1.40.0,<2.0.0
+playwright-stealth>=1.0.0,<2.0.0
+
+# Testing
+pytest>=7.4.0,<8.0.0
+pytest-asyncio>=0.21.0,<1.0.0
+
+# setup tools being annoying
+# do not change. will break. 
+setuptools==82.0.0

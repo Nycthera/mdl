@@ -12,6 +12,7 @@
 ## Core Technology Stack
 
 ### Python Application
+
 - **Python 3.13** - Core application with advanced async features
 - **asyncio** - Non-blocking concurrent operations
 - **aiohttp** - Async HTTP client with connection pooling
@@ -20,6 +21,7 @@
 - **requests** - Synchronous HTTP for simple operations
 
 ### Development & Testing
+
 - **pytest** - Unit testing framework
 - **pytest-asyncio** - Async test support
 - **GitHub Actions** - CI/CD pipeline for automated testing
@@ -27,12 +29,14 @@
 ## Architecture Deep Dive
 
 ### Concurrency Model
+
 - **asyncio with semaphores** - Bounded concurrency for smoother progress updates
 - **aiohttp ClientSession** - Persistent connection pooling for optimized network performance
 - **asyncio.as_completed** - Incremental progress updates as tasks complete
 - **Maximum 10 concurrent downloads** - Configurable worker limit to prevent server overload
 
 ### Data Sources & Resilience
+
 - **Multi-Source Architecture** - Automatic failover between manga hosting services
 - **MangaDx API Integration** - Primary source with UUID-based identification
 - **Web Scraping Fallback** - Playwright-based scraping for additional sources
@@ -41,12 +45,14 @@
   - Title extraction: `/manga/([^/]+)/`
 
 ### Error Handling & Rate Limiting
+
 - **RateLimiter class** - Exponential backoff to handle server constraints
 - **5 retry attempts** - Automatic retry with increasing delays
 - **Async timeout handling** - Graceful timeout management
 - **Signal handling** - Clean shutdown on SIGINT (Ctrl+C)
 
 ### User Interface
+
 - **Rich Progress Bars** - Real-time visualization with:
   - Spinner for active status
   - Time elapsed/remaining
@@ -56,13 +62,15 @@
 - **Colored Console Output** - Rich console with styled text and panels
 
 ### Configuration Management
+
 - **JSON-based config** - Stored in `~/.config/manga_downloader/config.json`
+- **SQLite tracking DB** - Stored in `~/.config/manga_downloader/manga_collection.db`
 - **Default values** - Automatic creation if config doesn't exist
 - **User preferences** - Persistent settings across runs
 
 ## Key Files & Structure
 
-```
+```text
 mdl/
 ├── main.py                 # Core CLI application (~415 lines)
 │   ├── Async download logic with bounded concurrency
@@ -96,6 +104,7 @@ mdl/
 ## Important Code Patterns
 
 ### 1. Async Download with Semaphore
+
 ```python
 # Bounded concurrency to prevent overwhelming servers
 semaphore = asyncio.Semaphore(workers)
@@ -105,6 +114,7 @@ async with semaphore:
 ```
 
 ### 2. Progress Tracking
+
 ```python
 # Rich progress bars with multiple columns
 progress = Progress(
@@ -117,6 +127,7 @@ progress = Progress(
 ```
 
 ### 3. Signal Handling
+
 ```python
 # Graceful shutdown on interrupts
 stop_signal = False
@@ -127,6 +138,7 @@ signal.signal(signal.SIGINT, signal_handler)
 ```
 
 ### 4. Configuration Management
+
 ```python
 # JSON config in user home directory
 CONFIG_FILE = ~/.config/manga_downloader/config.json
@@ -139,6 +151,7 @@ def load_config():
 ## Command-Line Interface
 
 ### Main Arguments
+
 - `-M, --manga-name` - Manga title or MangaDx URL
 - `--workers` - Number of concurrent downloads (default: 10)
 - `--max-pages` - Limit pages to download
@@ -147,6 +160,7 @@ def load_config():
 - `--update` - Self-update from GitHub releases
 
 ### Usage Examples
+
 ```bash
 # Basic download
 python main.py -M "one-piece"
@@ -164,6 +178,7 @@ python main.py -M "naruto" --clean-output
 ## Testing Strategy
 
 ### Unit Tests (pytest)
+
 - **Config management** - Creation, loading, defaults
 - **URL sanitization** - Illegal character removal
 - **Download mocking** - aiohttp response simulation
@@ -171,6 +186,7 @@ python main.py -M "naruto" --clean-output
 - **Async testing** - pytest-asyncio for async functions
 
 ### CI/CD Pipeline
+
 - **Automated testing** - Run on push/PR
 - **Python 3.13 compatibility** - Version-specific tests
 - **Optional releases** - Manual workflow dispatch
@@ -196,6 +212,7 @@ python main.py -M "naruto" --clean-output
 ## Configuration Options
 
 Default config structure:
+
 ```json
 {
   "manga_name": "",
@@ -229,6 +246,7 @@ The README references a Node.js API server (`Manga-API/`) with 5 RESTful endpoin
 ## Dependencies
 
 ### Production
+
 - `aiohttp` - Async HTTP client
 - `playwright` - Browser automation
 - `playwright-stealth` - Anti-detection for scraping
@@ -236,12 +254,14 @@ The README references a Node.js API server (`Manga-API/`) with 5 RESTful endpoin
 - `rich` - Terminal UI
 
 ### Development
+
 - `pytest` - Testing framework
 - `pytest-asyncio` - Async test support
 
 ## When Working on This Project
 
 ### Always Consider
+
 1. **Async/await patterns** - All I/O should be non-blocking
 2. **Semaphore limits** - Respect concurrent worker bounds
 3. **Error handling** - Add retry logic with backoff
@@ -251,6 +271,7 @@ The README references a Node.js API server (`Manga-API/`) with 5 RESTful endpoin
 7. **Clean shutdown** - Handle signals gracefully
 
 ### Common Tasks
+
 - **Add new source** - Extend URL pattern matching
 - **Modify concurrency** - Adjust semaphore limits
 - **Update UI** - Modify Rich progress components
@@ -258,6 +279,7 @@ The README references a Node.js API server (`Manga-API/`) with 5 RESTful endpoin
 - **Change config** - Update default_config dict
 
 ### Code Style
+
 - Type hints where beneficial
 - Async functions for I/O operations
 - Rich console for user output

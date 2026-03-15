@@ -1,134 +1,157 @@
-# Installation & Usage Guide
+# Installation & Setup Guide
 
-## Prerequisites
+Version: 3.5.0
+Updated: March 2026
+
+Installers now open a selection screen so you can choose what to install:
+
+- Python dependency mode: user site-packages or project venv
+- Playwright browsers
+- Manga-API/Node dependencies
+- CLI wrapper
+
+## System Requirements
 
 - Python 3.13+
-- Node.js 18+
-- npm/yarn
+- pip (bundled with Python)
+- Node.js 18+ (optional, only for Manga-API)
 
-## Installation
-
-### Python CLI
+## Recommended Install (One Command)
 
 ```bash
-# Clone repository
 git clone https://github.com/Nycthera/mdl.git
 cd mdl
-
-# Install Python dependencies
-pip install -r requirements.txt
-
-# Run CLI application
-python main.py -M "manga-name-or-url"
+python main.py --update
 ```
 
-OR
+What this does:
 
-### Install packages
+- Shows a selection screen for components and Python mode
+- Verifies Python is available
+- Installs selected dependencies and tools
 
-### Mac/Linux
+## Script Installers
+
+### macOS/Linux
 
 ```bash
-git clone https://github.com/nycthera/mdl.git
-cd mdl
 chmod +x install.sh
 ./install.sh
 ```
 
-### Windows
+The script prompts you to choose install mode and optional components.
+
+The script creates a CLI wrapper at:
+
+```text
+~/.local/bin/mdl
+```
+
+If needed, add this to PATH:
 
 ```bash
-git clone https://github.com/nycthera/mdl.git
-cd mdl
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+### Windows
+
+```bat
 install.bat
 ```
 
-### API Server
+The script prompts you to choose install mode and optional components.
 
-```bash
-# Navigate to API directory
-cd Manga-API
+The script creates a CLI wrapper at:
 
-# Install Node.js dependencies
-npm install
-
-# Start server
-npm start
+```text
+%USERPROFILE%\bin\mdl.cmd
 ```
 
-## Usage Examples
+Add `%USERPROFILE%\bin` to your PATH, then open a new terminal.
 
-### Basic Manga Download
+## Manual Install (No venv)
+
+### 1. Install Python dependencies
 
 ```bash
+python -m pip install --upgrade pip
+python -m pip install --user -r requirements.txt
+```
+
+### 2. Install Playwright browsers
+
+```bash
+python -m playwright install
+```
+
+### 3. Optional: install API server dependencies
+
+```bash
+cd server
+npm install
+cd ..
+```
+
+## Running MDL
+
+```bash
+python main.py --help
 python main.py -M "one-piece"
 ```
 
-### MangaDx URL Download
+If your CLI wrapper is on PATH:
 
 ```bash
-python main.py -M "https://mangadx.org/title/uuid/manga-name"
+mdl --help
+mdl -M "one-piece"
 ```
 
-### Advanced Configuration
+## Verification
 
 ```bash
-python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
+python --version
+python -c "import aiohttp, rich, playwright; print('ok')"
+python main.py --version
 ```
 
-### Clean Output Mode (summary only)
+## Troubleshooting
+
+### Python command not found
+
+- Windows: install Python from python.org and enable Add to PATH
+- macOS: install with Homebrew (`brew install python3`)
+- Linux: install with your package manager (`python3`, `python3-pip`)
+
+### Dependency install permission errors
+
+Use user-scoped install:
 
 ```bash
-python main.py --clean-output -M "naruto"
+python -m pip install --user -r requirements.txt
 ```
 
-This suppresses progress bars and prints a compact summary panel at the end.
+If your distro blocks user-site installs, use your package manager Python and pip setup.
 
-### API Testing
+### Playwright browser install fails
 
 ```bash
-# Test API endpoints
-python test.py
-
-# Manual API calls
-curl "http://localhost:3000/api/search?query=one-piece"
+python -m playwright install
 ```
 
-## Configuration
-
-The application creates a config file at `~/.config/manga_downloader/config.json`:
-
-```json
-{
-  "manga_name": "",
-  "start_chapter": 1,
-  "start_page": 1,
-  "max_pages": 50,
-  "workers": 10,
-  "cbz": true,
-  "clean_output": false,
-  "md_language": "en"
-}
-```
-
-### Playwright install
+Linux only (if required):
 
 ```bash
-playwright install
+python -m playwright install-deps
 ```
 
-## Development
+### CLI command not found after install
 
-### Running Tests
+- macOS/Linux: ensure `~/.local/bin` is in PATH
+- Windows: ensure `%USERPROFILE%\bin` is in PATH
+- Restart terminal after PATH changes
 
-```bash
-# Python tests
-pytest -v
+## Notes
 
-# API integration tests
-python test.py
-```
-
-### CI/CD
-
-GitHub Actions automatically runs tests on push/PR and supports optional releases via workflow dispatch.
+- User mode: no activation step is needed.
+- Venv mode: activate with `source venv/bin/activate` (Unix) or `call venv\Scripts\activate` (Windows).
+- Re-run `python main.py --update` any time you pull new changes.
