@@ -252,6 +252,7 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
         if not _run_command([*run_py, "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"):
             return
 
+        req_path = os.path.join(base_path, "requirements.txt")
         if options["mode"] == "venv":
             pip_cmd = [*run_py, "-m", "pip", "install", "-r", req_path]
         else:
