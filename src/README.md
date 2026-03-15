@@ -49,7 +49,7 @@ The `scrapers/` package contains different data sources:
 
 ### Clean State Management
 
-Each module has `set_clean_output()` and `set_stop_signal()` functions to manage global state consistently across modules.
+Each module that supports interruption exposes `set_stop_signal()`, and all output-producing modules expose `set_clean_output()`, to manage global state consistently. Not every module needs both — utility modules like `cbz.py` and `config.py` do not implement `set_stop_signal()` since they don't run interruptible loops.
 
 ### Modular Design
 

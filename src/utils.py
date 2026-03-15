@@ -44,9 +44,11 @@ def extract_manga_name_from_url(manga_input: str) -> str:
         if len(parts) >= 2:
             name = parts[1]
             return name.replace("-", " ")
-        else:
+        elif parts:
             name = parts[-1]
             return name.replace("-", " ")
+        else:
+            return manga_input
     return manga_input
 
 
@@ -73,8 +75,10 @@ def get_slug_and_pretty(manga_input: str) -> Tuple[str, str]:
         parts = [p for p in path.split("/") if p]
         if len(parts) >= 2:
             slug = parts[1]
-        else:
+        elif parts:
             slug = parts[-1]
+        else:
+            slug = manga_input
     else:
         slug = manga_input
 

@@ -75,41 +75,42 @@ async def fetch_weebcentral_images(url: str) -> Tuple[List[str], str]:
         if not CLEAN_OUTPUT:
             console.print(f"[green]Using {browser_name} browser[/]")
 
-        page = await browser.new_page()
-
-        if not CLEAN_OUTPUT:
-            console.print("[cyan] Loading page... please wait...[/]")
         try:
-            response = await page.goto(url, wait_until="load", timeout=45000)
-            if not response or response.status != 200:
-                if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[red] Failed to load page (status {response.status if response else 0})[/]"
-                    )
-                return [], "Unknown_Title"
-        except Exception as e:
+            page = await browser.new_page()
+
             if not CLEAN_OUTPUT:
-                console.print(f"[red] Page load warning: {e}[/]")
-            return [], "Unknown_Title"
+                console.print("[cyan] Loading page... please wait...[/]")
+            try:
+                response = await page.goto(url, wait_until="load", timeout=45000)
+                if not response or response.status != 200:
+                    if not CLEAN_OUTPUT:
+                        console.print(
+                            f"[red] Failed to load page (status {response.status if response else 0})[/]"
+                        )
+                    return [], "Unknown_Title"
+            except Exception as e:
+                if not CLEAN_OUTPUT:
+                    console.print(f"[red] Page load warning: {e}[/]")
+                return [], "Unknown_Title"
 
-        if not CLEAN_OUTPUT:
-            console.print("[yellow] Scrolling for lazy-loaded images...[/]")
-        for _ in range(20):
-            await page.mouse.wheel(0, 1200)
-            await asyncio.sleep(0.7)
+            if not CLEAN_OUTPUT:
+                console.print("[yellow] Scrolling for lazy-loaded images...[/]")
+            for _ in range(20):
+                await page.mouse.wheel(0, 1200)
+                await asyncio.sleep(0.7)
 
-        await asyncio.sleep(4)
+            await asyncio.sleep(4)
 
-        img_elements = await page.query_selector_all("img")
-        img_urls = []
-        for img in img_elements:
-            src = await img.get_attribute("src")
-            if src and "/manga/" in src and src.endswith(".png"):
-                img_urls.append(urljoin(url, src))
+            img_elements = await page.query_selector_all("img")
+            img_urls = []
+            for img in img_elements:
+                src = await img.get_attribute("src")
+                if src and "/manga/" in src and src.endswith(".png"):
+                    img_urls.append(urljoin(url, src))
 
-        title = extract_title_from_image_urls(img_urls)
-
-        await browser.close()
+            title = extract_title_from_image_urls(img_urls)
+        finally:
+            await browser.close()
 
         if not CLEAN_OUTPUT:
             # --- Fancy summary table ---

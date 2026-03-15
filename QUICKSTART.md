@@ -20,6 +20,21 @@ python main.py --update
 
 Done! ✅
 
+Setup now shows a selection screen where you can choose:
+
+- user install (no venv) or project venv
+- Playwright install
+- Node/Manga-API install
+- CLI wrapper install
+
+If you prefer manual no-venv setup:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install --user -r requirements.txt
+python -m playwright install
+```
+
 ## First Download (15 seconds)
 
 ```bash
@@ -97,4 +112,4 @@ python main.py -M "manga" --workers 3
 
 ---
 
-**Version 3.4.0** | For complete docs, see [README.md](README.md)
+**Version 3.5.0** | For complete docs, see [README.md](README.md)

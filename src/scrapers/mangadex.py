@@ -157,7 +157,8 @@ async def get_manga_name_from_md(
         return (
             title_dict.get(lang)
             or title_dict.get("en")
-            or list(title_dict.values())[0]
+            or next(iter(title_dict.values()), None)
+            or extract_manga_name_from_url(manga_url)
         )
 
 

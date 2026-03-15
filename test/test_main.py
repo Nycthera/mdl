@@ -179,6 +179,8 @@ async def test_download_image_http_error(tmp_path: Path):
         "http://example.com/x.png",
         str(tmp_path),
         session=DummySession(),
+        max_retries=1,
+        backoff_factor=0,
     )
 
     assert "Failed" in msg or "error" in msg.lower()

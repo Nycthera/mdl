@@ -32,16 +32,19 @@ class RateLimiter:
         Args:
             key: Identifier for rate limit group
         """
-        lock = await self._get_lock()
-        async with lock:
-            now = _loop_time()
-            calls = self.calls[key]
-            while calls and calls[0] <= now - self.per_seconds:
-                calls.pop(0)
-            if len(calls) >= self.max_calls:
+        while True:
+            lock = await self._get_lock()
+            async with lock:
+                now = _loop_time()
+                calls = self.calls[key]
+                while calls and calls[0] <= now - self.per_seconds:
+                    calls.pop(0)
+                if len(calls) < self.max_calls:
+                    self.calls[key].append(_loop_time())
+                    return
                 sleep_for = self.per_seconds - (now - calls[0])
-                await asyncio.sleep(max(sleep_for, 0))
-            self.calls[key].append(_loop_time())
+            # Release the lock before sleeping so other keys aren't blocked
+            await asyncio.sleep(max(sleep_for, 0))
 
 
 # Global rate limiters

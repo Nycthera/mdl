@@ -71,6 +71,8 @@ cd mdl
 python main.py --update
 ```
 
+The updater shows a selection screen so you can choose Python mode (user/venv) and optional components.
+
 #### Option 2: Manual Setup
 
 ```bash
@@ -85,15 +87,9 @@ install.bat
 #### Option 3: Manual Installation
 
 ```bash
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# macOS/Linux: source venv/bin/activate
-# Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies in user site-packages (no venv)
+python -m pip install --upgrade pip
+python -m pip install --user -r requirements.txt
 
 # Install Playwright browsers
 python -m playwright install
