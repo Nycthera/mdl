@@ -137,7 +137,8 @@ async def get_images_md(
             pages = chapter_data.get("dataSaver" if use_saver else "data", [])
             if not base_url or not hash_code or not pages:
                 return []
-            return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
+            path_segment = "data-saver" if use_saver else "data"
+            return [f"{base_url}/{path_segment}/{hash_code}/{page}" for page in pages]
     return []
 
 
