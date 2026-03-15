@@ -106,19 +106,11 @@ async def _cancel_pending_tasks(tasks: list) -> None:
 
 def safe_delete_folder(folder_path: str) -> None:
     """Safely delete a folder and all its contents."""
+    folder = pathlib.Path(folder_path)
+    if not folder.exists():
+        return
     try:
-        folder = pathlib.Path(folder_path)
-        for item in folder.rglob("*"):
-            try:
-                if item.is_file() or item.is_symlink():
-                    item.unlink()
-                elif item.is_dir():
-                    shutil.rmtree(item)
-            except Exception as e:
-                console.print(f"[yellow]Warning: could not delete {item}: {e}[/]")
-        # Try removing the root folder at the end
-        if folder.exists():
-            folder.rmdir()
+        shutil.rmtree(folder)
         console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
     except Exception as e:
         console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
