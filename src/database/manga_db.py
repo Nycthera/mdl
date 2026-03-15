@@ -105,6 +105,21 @@ def infer_latest_chapter_from_folders(folders: Iterable[str]) -> float:
     return latest
 
 
+def has_new_mangadex_release(
+    latest_chapter_local: str | int | float | None,
+    latest_chapter_from_mangadex: str | int | float | None,
+) -> bool:
+    """Return True when MangaDex reports a chapter newer than local data."""
+    local_value = _parse_chapter_number(latest_chapter_local)
+    source_value = _parse_chapter_number(latest_chapter_from_mangadex)
+
+    if source_value is None:
+        return False
+    if local_value is None:
+        local_value = 0.0
+    return source_value > local_value
+
+
 def _has_unique_index(cursor: sqlite3.Cursor, table_name: str, column_name: str) -> bool:
     """Return whether a table has a unique index for the given column."""
     cursor.execute(f"PRAGMA index_list({table_name})")

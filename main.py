@@ -74,6 +74,7 @@ from src.scrapers.weebcentral import (
 from src.system_utils import update, credits
 from src.database.manga_db import (
     get_tracked_manga,
+    has_new_mangadex_release,
     set_clean_output as set_db_clean_output,
     set_dev_mode as set_db_dev_mode,
 )
@@ -182,6 +183,16 @@ async def _auto_update_from_db(
 
         manga_name = str(item["manga_name"])
         latest_local = float(item["latest_chapter_local"])
+        latest_source = float(item["latest_chapter_from_mangadex"])
+
+        if not has_new_mangadex_release(latest_local, latest_source):
+            processed += 1
+            if not CLEAN_OUTPUT:
+                console.print(
+                    f"[yellow]Skipping '{manga_name}': MangaDex latest ({latest_source}) is not newer than local ({latest_local}).[/]"
+                )
+            continue
+
         start_chapter = _calculate_resume_chapter(latest_local)
 
         if not CLEAN_OUTPUT:

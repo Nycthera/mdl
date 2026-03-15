@@ -15,6 +15,7 @@ import src.utils as utils_mod
 from src.cbz import create_cbz_for_all
 from src.database.manga_db import (
     ensure_schema,
+    has_new_mangadex_release,
     infer_latest_chapter_from_folders,
     get_tracked_manga,
     record_download,
@@ -336,6 +337,15 @@ def test_get_tracked_manga(tmp_path: Path):
     assert len(tracked) == 2
     assert tracked[0]["manga_name"] == "A"
     assert tracked[1]["manga_name"] == "B"
+
+
+def test_has_new_mangadex_release_true_when_source_is_higher():
+    assert has_new_mangadex_release(12.0, 12.5)
+
+
+def test_has_new_mangadex_release_false_when_source_not_higher():
+    assert not has_new_mangadex_release(12.5, 12.5)
+    assert not has_new_mangadex_release(13.0, 12.5)
 
 
 def test_calculate_resume_chapter():
