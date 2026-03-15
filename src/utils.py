@@ -4,6 +4,7 @@ import asyncio
 import pathlib
 import re
 import shutil
+import sys
 from urllib.parse import urlparse
 from typing import Optional, Tuple
 from rich.console import Console
@@ -33,7 +34,7 @@ def validate_manga_input(manga_name: Optional[str]) -> None:
             "Error: No manga name or URL specified. Use -M/--manga or set a default in config.",
             Colors.RED,
         )
-        exit(1)
+        sys.exit(1)
 
 
 def extract_manga_name_from_url(manga_input: str) -> str:
