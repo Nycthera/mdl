@@ -2,9 +2,11 @@
 
 import os
 import platform
+import shlex
+import shutil
 import subprocess
 import sys
-from typing import List, Dict
+from typing import List, Dict, Union
 
 from rich.console import Console
 from rich.panel import Panel
@@ -54,39 +56,38 @@ def credits(show: bool = False) -> List[Dict[str, str]]:
     return entries
 
 
-def _check_command_exists(cmd: str, check_cmd: str) -> bool:
+def _check_command_exists(cmd: str) -> bool:
     """Check if a command is available in PATH."""
-    try:
-        subprocess.run(
-            check_cmd,
-            shell=True,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    if shutil.which(cmd) is not None:
         return True
-    except subprocess.CalledProcessError:
-        # Use the `cmd` argument for clearer diagnostics while keeping behavior unchanged.
-        console.print(f"[yellow]Command not available in PATH: {cmd}[/]")
-        return False
+    console.print(f"[yellow]Command not available in PATH: {cmd}[/]")
+    return False
 
 
-def _run_command(cmd: str, description: str = "", shell_executable: str | None = None, cwd: str | None = None) -> bool:
-    """Run a shell command and handle errors."""
+def _run_command(
+    cmd: Union[str, List[str]],
+    description: str = "",
+    cwd: str | None = None,
+) -> bool:
+    """Run a command and handle errors.
+
+    Pass a list for ``shell=False`` (preferred); pass a string only when a
+    shell built-in or shell feature is strictly required (``shell=True``).
+    """
     if description:
         console.print(f"[cyan]{description}...[/]")
-    
+    use_shell = isinstance(cmd, str)
     try:
         subprocess.run(
-            cmd, 
-            shell=True, 
-            executable=shell_executable,
+            cmd,
+            shell=use_shell,
             check=True,
             cwd=cwd,
         )
         return True
     except subprocess.CalledProcessError as e:
-        console.print(f"[red]✗ Command failed: {cmd}[/]")
+        display = cmd if isinstance(cmd, str) else " ".join(str(c) for c in cmd)
+        console.print(f"[red]✗ Command failed: {display}[/]")
         console.print(f"[red]  Error: {e}[/]")
         return False
     except Exception as e:
@@ -140,62 +141,64 @@ def _collect_update_options() -> dict[str, bool | str]:
     }
 
 
-def _resolve_windows_python_cmd() -> str | None:
-    """Resolve Python launcher command for Windows shell usage."""
-    if _check_command_exists("py", "where py"):
-        return "py -3"
-    if _check_command_exists("python", "where python"):
-        return "python"
+def _resolve_windows_python_cmd() -> List[str] | None:
+    """Resolve Python launcher argv for Windows usage."""
+    if _check_command_exists("py"):
+        return ["py", "-3"]
+    if _check_command_exists("python"):
+        return ["python"]
     return None
 
 
-def _setup_windows_python(mode: str, base_path: str, py_cmd: str) -> str | None:
-    """Prepare Python command for Windows according to selected mode."""
+def _setup_windows_python(mode: str, base_path: str, py_cmd: List[str]) -> List[str] | None:
+    """Prepare Python argv list for Windows according to selected mode."""
     if mode == "venv":
         venv_path = os.path.join(base_path, "venv")
         if not os.path.exists(venv_path):
-            if not _run_command(f"{py_cmd} -m venv \"{venv_path}\"", "Creating virtual environment"):
+            if not _run_command([*py_cmd, "-m", "venv", venv_path], "Creating virtual environment"):
                 return None
         python_exe = os.path.join(venv_path, "Scripts", "python.exe")
-        return f'"{python_exe}"'
+        return [python_exe]
     return py_cmd
 
 
-def _setup_unix_python(mode: str, base_path: str) -> str | None:
-    """Prepare Python command for Unix according to selected mode."""
+def _setup_unix_python(mode: str, base_path: str) -> List[str] | None:
+    """Prepare Python argv list for Unix according to selected mode."""
     if mode == "venv":
         venv_path = os.path.join(base_path, "venv")
         if not os.path.exists(venv_path):
-            if not _run_command("python3 -m venv venv", "Creating virtual environment", "/bin/bash"):
+            if not _run_command(["python3", "-m", "venv", venv_path], "Creating virtual environment"):
                 return None
         python_exe = os.path.join(venv_path, "bin", "python")
-        return f'"{python_exe}"'
-    return "python3"
+        return [python_exe]
+    return ["python3"]
 
 
-def _install_cli_wrapper_windows(base_path: str, py_cmd: str) -> bool:
+def _install_cli_wrapper_windows(base_path: str, py_cmd: List[str]) -> bool:
     """Install user-local CLI wrapper on Windows."""
     user_bin = os.path.join(os.path.expanduser("~"), "bin")
     os.makedirs(user_bin, exist_ok=True)
     wrapper_path = os.path.join(user_bin, "mdl.cmd")
 
+    py_str = subprocess.list2cmdline(py_cmd)
     with open(wrapper_path, "w", encoding="utf-8") as wrapper:
         wrapper.write("@echo off\n")
-        wrapper.write(f"{py_cmd} \"{os.path.join(base_path, 'main.py')}\" %*\n")
+        wrapper.write(f"{py_str} \"{os.path.join(base_path, 'main.py')}\" %*\n")
 
     console.print(f"[green]✓ CLI wrapper installed at {wrapper_path}[/]")
     return True
 
 
-def _install_cli_wrapper_unix(base_path: str, py_cmd: str) -> bool:
+def _install_cli_wrapper_unix(base_path: str, py_cmd: List[str]) -> bool:
     """Install user-local CLI wrapper on Unix."""
     user_bin = os.path.join(os.path.expanduser("~"), ".local", "bin")
     os.makedirs(user_bin, exist_ok=True)
     wrapper_path = os.path.join(user_bin, "mdl")
 
+    py_str = " ".join(shlex.quote(p) for p in py_cmd)
     with open(wrapper_path, "w", encoding="utf-8") as wrapper:
         wrapper.write("#!/bin/bash\n")
-        wrapper.write(f"exec {py_cmd} \"{os.path.join(base_path, 'main.py')}\" \"$@\"\n")
+        wrapper.write(f"exec {py_str} \"{os.path.join(base_path, 'main.py')}\" \"$@\"\n")
 
     os.chmod(wrapper_path, 0o755)
     console.print(f"[green]✓ CLI wrapper installed at {wrapper_path}[/]")
@@ -239,27 +242,26 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
 
     console.print(f"[green]✓ Python found (mode={options['mode']})[/]")
 
-    has_npm = _check_command_exists("npm", "where npm")
+    has_npm = _check_command_exists("npm")
     if has_npm:
         console.print("[green]✓ Node.js found[/]\n")
     else:
         console.print("[yellow]⚠ Node.js not found. API server (server/) setup will be skipped[/]\n")
     
     if options["python_deps"]:
-        if not _run_command(f"{run_py} -m pip install --upgrade pip", "Upgrading pip"):
+        if not _run_command([*run_py, "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"):
             return
 
-        req_path = os.path.join(base_path, "requirements.txt")
         if options["mode"] == "venv":
-            pip_cmd = f'{run_py} -m pip install -r "{req_path}"'
+            pip_cmd = [*run_py, "-m", "pip", "install", "-r", req_path]
         else:
-            pip_cmd = f'{run_py} -m pip install --user -r "{req_path}"'
+            pip_cmd = [*run_py, "-m", "pip", "install", "--user", "-r", req_path]
         if not _run_command(pip_cmd, "Installing Python dependencies"):
             return
         console.print("[green]✓ Python dependencies installed[/]\n")
 
     if options["playwright"]:
-        if not _run_command(f"{run_py} -m playwright install", "Installing Playwright browsers"):
+        if not _run_command([*run_py, "-m", "playwright", "install"], "Installing Playwright browsers"):
             return
         console.print("[green]✓ Playwright browsers installed[/]\n")
 
@@ -268,7 +270,7 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
     package_json_path = os.path.join(manga_api_path, "package.json")
     
     if options["node_deps"] and has_npm and os.path.exists(package_json_path):
-        if not _run_command("npm install", "Installing Node.js dependencies", cwd=manga_api_path):
+        if not _run_command(["npm", "install"], "Installing Node.js dependencies", cwd=manga_api_path):
             console.print("[yellow]⚠ Node.js setup failed, but Python CLI will still work[/]\n")
     elif options["node_deps"] and not has_npm and os.path.exists(package_json_path):
         console.print("[yellow]⚠ npm not found, skipping server/ setup[/]\n")
@@ -286,7 +288,7 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
     console.print("\n[bold cyan]Setting up for Unix/Linux (macOS, Linux)...[/]\n")
     
     # Check Python 3
-    if not _check_command_exists("python3", "command -v python3"):
+    if not _check_command_exists("python3"):
         console.print("[red]✗ Error: python3 is not installed[/]")
         console.print("[yellow]  macOS: brew install python[/]")
         console.print("[yellow]  Linux: sudo apt-get install python3 python3-pip[/]")
@@ -298,27 +300,27 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
 
     console.print(f"[green]✓ Python found (mode={options['mode']})[/]")
 
-    has_npm = _check_command_exists("npm", "command -v npm")
+    has_npm = _check_command_exists("npm")
     if has_npm:
         console.print("[green]✓ Node.js found[/]\n")
     else:
         console.print("[yellow]⚠ Node.js not found. API server (server/) setup will be skipped[/]\n")
     
     if options["python_deps"]:
-        if not _run_command(f"{run_py} -m pip install --upgrade pip", "Upgrading pip", "/bin/bash"):
+        if not _run_command([*run_py, "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"):
             return
 
         req_path = os.path.join(base_path, "requirements.txt")
         if options["mode"] == "venv":
-            pip_cmd = f'{run_py} -m pip install -r "{req_path}"'
+            pip_cmd = [*run_py, "-m", "pip", "install", "-r", req_path]
         else:
-            pip_cmd = f'{run_py} -m pip install --user -r "{req_path}"'
-        if not _run_command(pip_cmd, "Installing Python dependencies", "/bin/bash"):
+            pip_cmd = [*run_py, "-m", "pip", "install", "--user", "-r", req_path]
+        if not _run_command(pip_cmd, "Installing Python dependencies"):
             return
         console.print("[green]✓ Python dependencies installed[/]\n")
 
     if options["playwright"]:
-        if not _run_command(f"{run_py} -m playwright install", "Installing Playwright browsers", "/bin/bash"):
+        if not _run_command([*run_py, "-m", "playwright", "install"], "Installing Playwright browsers"):
             return
         console.print("[green]✓ Playwright browsers installed[/]\n")
 
@@ -327,7 +329,7 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
     package_json_path = os.path.join(manga_api_path, "package.json")
     
     if options["node_deps"] and has_npm and os.path.exists(package_json_path):
-        if not _run_command("npm install", "Installing Node.js dependencies", "/bin/bash", cwd=manga_api_path):
+        if not _run_command(["npm", "install"], "Installing Node.js dependencies", cwd=manga_api_path):
             console.print("[yellow]⚠ Node.js setup failed, but Python CLI will still work[/]\n")
     elif options["node_deps"] and not has_npm and os.path.exists(package_json_path):
         console.print("[yellow]⚠ npm not found, skipping server/ setup[/]\n")
