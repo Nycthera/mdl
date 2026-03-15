@@ -6,10 +6,46 @@ import os
 import signal
 import sys
 
-from rich.align import Align
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
+try:
+    from rich.align import Align
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    RICH_AVAILABLE = True
+except ImportError:  # Fallback to stdlib-only behavior when Rich is not installed
+    RICH_AVAILABLE = False
+
+    class Console:
+        """Minimal fallback console that prints directly to stdout."""
+
+        def print(self, *args, **kwargs):
+            # Ignore Rich-specific kwargs like style, justify, etc.
+            print(*args)
+
+    class Align:
+        """Fallback Align that simply stores the renderable."""
+
+        def __init__(self, renderable, *_, **__):
+            self.renderable = renderable
+
+    class Panel:
+        """Fallback Panel that simply stores the renderable."""
+
+        def __init__(self, renderable, *_, **__):
+            self.renderable = renderable
+
+    class Table:
+        """Fallback Table that records rows for later printing."""
+
+        def __init__(self, *_, **__):
+            self._rows = []
+
+        def add_column(self, *_, **__):
+            # Column metadata is ignored in the fallback implementation.
+            pass
+
+        def add_row(self, *columns):
+            self._rows.append(columns)
 
 from src.cli import parse_args
 from src.config import load_config, save_config
