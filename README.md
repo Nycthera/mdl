@@ -67,6 +67,10 @@
 git clone https://github.com/Nycthera/mdl.git
 cd mdl
 
+# Install minimal Python dependencies required for the updater
+python -m pip install --upgrade pip
+python -m pip install rich
+
 # Run automated setup
 python main.py --update
 ```
