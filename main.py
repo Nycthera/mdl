@@ -5,6 +5,7 @@ import asyncio
 import os
 import signal
 import sys
+from urllib.parse import urlparse
 
 try:
     from rich.align import Align
@@ -156,6 +157,28 @@ def _calculate_resume_chapter(latest_local: float) -> int:
     return max(1, int(latest_local))
 
 
+def _detect_source_from_input(manga_input: str) -> str | None:
+    """Detect known source from a user input URL.
+
+    Returns one of: "mangadex", "weebcentral", or None.
+    """
+    text = (manga_input or "").strip()
+    if not text:
+        return None
+
+    parsed = urlparse(text)
+    host = (parsed.netloc or "").lower()
+    if not host and text.lower().startswith("www."):
+        # Handle inputs like "www.example.com/..." without a scheme.
+        host = text.lower().split("/", 1)[0]
+
+    if "mangadex.org" in host:
+        return "mangadex"
+    if "weebcentral.com" in host or "weebcentral" in host:
+        return "weebcentral"
+    return None
+
+
 async def _auto_update_from_db(
     workers: int,
     start_page: int,
@@ -288,15 +311,17 @@ async def main():
 
     validate_manga_input(manga_name)
 
+    source = _detect_source_from_input(manga_name)
+
     # ---- MangaDex case ----
-    if manga_name.lower().startswith("http") and "mangadex" in manga_name.lower():
+    if source == "mangadex":
         await download_md_chapters(
             manga_name, lang=md_lang, use_saver=False, create_cbz=cbz_flag
         )
         return
 
     # ---- WeebCentral explicit URL case ----
-    if manga_name.lower().startswith("http") and "weebcentral" in manga_name.lower():
+    if source == "weebcentral":
         if not CLEAN_OUTPUT:
             console.print(
                 Panel.fit(
