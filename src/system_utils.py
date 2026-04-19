@@ -147,7 +147,7 @@ def _ask_install_mode() -> str:
 
     console.print("\n[bold cyan]Python install mode[/]")
     console.print("[white]1)[/] User site-packages (no venv)")
-    console.print("[white]2)[/] Project venv at ./venv")
+    console.print("[white]2)[/] Managed venv in installed app directory")
     while True:
         answer = input("Choose mode [1/2] (default 1): ").strip()
         if answer in {"", "1"}:
@@ -178,10 +178,70 @@ def _resolve_windows_python_cmd() -> List[str] | None:
     return None
 
 
-def _setup_windows_python(mode: str, base_path: str, py_cmd: List[str]) -> List[str] | None:
+def _get_install_root_windows() -> str:
+    """Get user-local install root for Windows."""
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return os.path.join(local_app_data, "mdl")
+    return os.path.join(os.path.expanduser("~"), "AppData", "Local", "mdl")
+
+
+def _get_install_root_unix() -> str:
+    """Get user-local install root for Unix-like systems."""
+    return os.path.join(os.path.expanduser("~"), ".local", "share", "mdl")
+
+
+def _sync_installed_app(base_path: str, install_root: str, include_server: bool) -> str | None:
+    """Copy runnable project files to a managed install directory."""
+    app_path = os.path.join(install_root, "app")
+
+    try:
+        os.makedirs(install_root, exist_ok=True)
+        if os.path.exists(app_path):
+            shutil.rmtree(app_path)
+        os.makedirs(app_path, exist_ok=True)
+
+        required_files = ["main.py", "requirements.txt"]
+        required_dirs = ["src"]
+
+        for filename in required_files:
+            src_path = os.path.join(base_path, filename)
+            if not os.path.exists(src_path):
+                console.print(f"[red]✗ Missing required file: {src_path}[/]")
+                return None
+            shutil.copy2(src_path, os.path.join(app_path, filename))
+
+        for dirname in required_dirs:
+            src_dir = os.path.join(base_path, dirname)
+            if not os.path.isdir(src_dir):
+                console.print(f"[red]✗ Missing required directory: {src_dir}[/]")
+                return None
+            shutil.copytree(
+                src_dir,
+                os.path.join(app_path, dirname),
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+
+        if include_server:
+            src_dir = os.path.join(base_path, "server")
+            if os.path.isdir(src_dir):
+                shutil.copytree(
+                    src_dir,
+                    os.path.join(app_path, "server"),
+                    ignore=shutil.ignore_patterns("node_modules", "__pycache__", "*.pyc"),
+                )
+
+        console.print(f"[green]✓ Installed app copy prepared at {app_path}[/]")
+        return app_path
+    except Exception as e:
+        console.print(f"[red]✗ Failed to prepare installed app copy: {e}[/]")
+        return None
+
+
+def _setup_windows_python(mode: str, install_root: str, py_cmd: List[str]) -> List[str] | None:
     """Prepare Python argv list for Windows according to selected mode."""
     if mode == "venv":
-        venv_path = os.path.join(base_path, "venv")
+        venv_path = os.path.join(install_root, "venv")
         if not os.path.exists(venv_path):
             if not _run_command([*py_cmd, "-m", "venv", venv_path], "Creating virtual environment"):
                 return None
@@ -190,10 +250,10 @@ def _setup_windows_python(mode: str, base_path: str, py_cmd: List[str]) -> List[
     return py_cmd
 
 
-def _setup_unix_python(mode: str, base_path: str) -> List[str] | None:
+def _setup_unix_python(mode: str, install_root: str) -> List[str] | None:
     """Prepare Python argv list for Unix according to selected mode."""
     if mode == "venv":
-        venv_path = os.path.join(base_path, "venv")
+        venv_path = os.path.join(install_root, "venv")
         if not os.path.exists(venv_path):
             if not _run_command(["python3", "-m", "venv", venv_path], "Creating virtual environment"):
                 return None
@@ -202,7 +262,7 @@ def _setup_unix_python(mode: str, base_path: str) -> List[str] | None:
     return ["python3"]
 
 
-def _install_cli_wrapper_windows(base_path: str, py_cmd: List[str]) -> bool:
+def _install_cli_wrapper_windows(app_path: str, py_cmd: List[str]) -> bool:
     """Install user-local CLI wrapper on Windows."""
     user_bin = os.path.join(os.path.expanduser("~"), "bin")
     os.makedirs(user_bin, exist_ok=True)
@@ -211,13 +271,13 @@ def _install_cli_wrapper_windows(base_path: str, py_cmd: List[str]) -> bool:
     py_str = subprocess.list2cmdline(py_cmd)
     with open(wrapper_path, "w", encoding="utf-8") as wrapper:
         wrapper.write("@echo off\n")
-        wrapper.write(f"{py_str} \"{os.path.join(base_path, 'main.py')}\" %*\n")
+        wrapper.write(f"{py_str} \"{os.path.join(app_path, 'main.py')}\" %*\n")
 
     console.print(f"[green]✓ CLI wrapper installed at {wrapper_path}[/]")
     return True
 
 
-def _install_cli_wrapper_unix(base_path: str, py_cmd: List[str]) -> bool:
+def _install_cli_wrapper_unix(app_path: str, py_cmd: List[str]) -> bool:
     """Install user-local CLI wrapper on Unix."""
     user_bin = os.path.join(os.path.expanduser("~"), ".local", "bin")
     os.makedirs(user_bin, exist_ok=True)
@@ -226,7 +286,7 @@ def _install_cli_wrapper_unix(base_path: str, py_cmd: List[str]) -> bool:
     py_str = " ".join(shlex.quote(p) for p in py_cmd)
     with open(wrapper_path, "w", encoding="utf-8") as wrapper:
         wrapper.write("#!/bin/bash\n")
-        wrapper.write(f"exec {py_str} \"{os.path.join(base_path, 'main.py')}\" \"$@\"\n")
+        wrapper.write(f"exec {py_str} \"{os.path.join(app_path, 'main.py')}\" \"$@\"\n")
 
     os.chmod(wrapper_path, 0o755)
     console.print(f"[green]✓ CLI wrapper installed at {wrapper_path}[/]")
@@ -259,14 +319,18 @@ def update() -> None:
     ))
 
     options = _collect_update_options()
+    install_root = _get_install_root_windows() if os_name == "windows" else _get_install_root_unix()
+    app_path = _sync_installed_app(base_path, install_root, include_server=bool(options["node_deps"]))
+    if not app_path:
+        return
 
     if os_name == "windows":
-        _update_windows(base_path, options)
+        _update_windows(base_path, app_path, install_root, options)
     else:
-        _update_unix(base_path, options)
+        _update_unix(base_path, app_path, install_root, options)
 
 
-def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
+def _update_windows(base_path: str, app_path: str, install_root: str, options: dict[str, bool | str]) -> None:
     """Update dependencies on Windows."""
     console.print("\n[bold cyan]Setting up for Windows...[/]\n")
     
@@ -278,7 +342,7 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
         console.print("[yellow]  Install from https://www.python.org/downloads/[/]")
         return
 
-    run_py = _setup_windows_python(str(options["mode"]), base_path, py_cmd)
+    run_py = _setup_windows_python(str(options["mode"]), install_root, py_cmd)
     if not run_py:
         return
 
@@ -294,7 +358,7 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
         if not _run_command([*run_py, "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"):
             return
 
-        req_path = os.path.join(base_path, "requirements.txt")
+        req_path = os.path.join(app_path, "requirements.txt")
         if options["mode"] == "venv":
             pip_cmd = [*run_py, "-m", "pip", "install", "-r", req_path]
         else:
@@ -309,7 +373,7 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
         console.print("[green]✓ Playwright browsers installed[/]\n")
 
     # Setup API server (server/ submodule)
-    manga_api_path = os.path.join(base_path, "server")
+    manga_api_path = os.path.join(app_path, "server")
     package_json_path = os.path.join(manga_api_path, "package.json")
     
     if options["node_deps"] and has_npm and os.path.exists(package_json_path):
@@ -321,12 +385,12 @@ def _update_windows(base_path: str, options: dict[str, bool | str]) -> None:
         console.print("[yellow]⚠ server/package.json not found, skipping npm setup[/]\n")
 
     if options["cli_wrapper"]:
-        _install_cli_wrapper_windows(base_path, run_py)
+        _install_cli_wrapper_windows(app_path, run_py)
 
     _print_completion_message("windows", str(options["mode"]))
 
 
-def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
+def _update_unix(base_path: str, app_path: str, install_root: str, options: dict[str, bool | str]) -> None:
     """Update dependencies on Unix-like systems (macOS, Linux)."""
     console.print("\n[bold cyan]Setting up for Unix/Linux (macOS, Linux)...[/]\n")
     
@@ -337,7 +401,7 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
         console.print("[yellow]  Linux: sudo apt-get install python3 python3-pip[/]")
         return
 
-    run_py = _setup_unix_python(str(options["mode"]), base_path)
+    run_py = _setup_unix_python(str(options["mode"]), install_root)
     if not run_py:
         return
 
@@ -353,7 +417,7 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
         if not _run_command([*run_py, "-m", "pip", "install", "--upgrade", "pip"], "Upgrading pip"):
             return
 
-        req_path = os.path.join(base_path, "requirements.txt")
+        req_path = os.path.join(app_path, "requirements.txt")
         if options["mode"] == "venv":
             pip_cmd = [*run_py, "-m", "pip", "install", "-r", req_path]
         else:
@@ -368,7 +432,7 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
         console.print("[green]✓ Playwright browsers installed[/]\n")
 
     # Setup API server (server/ submodule)
-    manga_api_path = os.path.join(base_path, "server")
+    manga_api_path = os.path.join(app_path, "server")
     package_json_path = os.path.join(manga_api_path, "package.json")
     
     if options["node_deps"] and has_npm and os.path.exists(package_json_path):
@@ -380,7 +444,7 @@ def _update_unix(base_path: str, options: dict[str, bool | str]) -> None:
         console.print("[yellow]⚠ server/package.json not found, skipping npm setup[/]\n")
 
     if options["cli_wrapper"]:
-        _install_cli_wrapper_unix(base_path, run_py)
+        _install_cli_wrapper_unix(app_path, run_py)
 
     _print_completion_message("unix", str(options["mode"]))
 
