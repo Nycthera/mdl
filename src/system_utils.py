@@ -372,7 +372,7 @@ def _update_windows(base_path: str, app_path: str, install_root: str, options: d
             return
         console.print("[green]✓ Playwright browsers installed[/]\n")
 
-    # Setup API server (server/ submodule)
+    # Setup API server in the server/ directory
     manga_api_path = os.path.join(app_path, "server")
     package_json_path = os.path.join(manga_api_path, "package.json")
     
