@@ -6,6 +6,63 @@ import os
 import signal
 import sys
 from urllib.parse import urlparse
+from src.cli import parse_args
+from src.config import load_config, save_config
+from src.utils import validate_manga_input, get_slug_and_pretty
+from src.downloader import (
+    download_all_pages,
+    set_clean_output as set_downloader_clean_output,
+    set_dev_mode as set_downloader_dev_mode,
+    set_stop_signal as set_downloader_stop_signal,
+)
+from src.cbz import create_cbz_for_all, set_clean_output as set_cbz_clean_output
+from src.scrapers.generic import (
+    gather_all_urls,
+    set_clean_output as set_generic_clean_output,
+    set_stop_signal as set_generic_stop_signal,
+)
+from src.scrapers.mangadex import (
+    download_md_chapters,
+    set_clean_output as set_md_clean_output,
+    set_stop_signal as set_md_stop_signal,
+)
+from src.scrapers.weebcentral import (
+    fetch_weebcentral_images,
+    set_clean_output as set_weeb_clean_output,
+)
+from src.system_utils import update, credits
+from src.database.manga_db import (
+    get_tracked_manga,
+    has_new_mangadex_release,
+    set_clean_output as set_db_clean_output,
+    set_dev_mode as set_db_dev_mode,
+)
+
+
+
+def _ensure_accessible_cwd() -> None:
+    """Ensure the process has a readable working directory.
+
+    Some environments launch commands from directories that no longer exist or
+    are no longer accessible. Rich calls os.getcwd() at import time, so recover
+    before importing it.
+    """
+    try:
+        os.getcwd()
+        return
+    except (FileNotFoundError, PermissionError, OSError):
+        pass
+
+    fallback_dirs = [os.path.expanduser("~"), "/"]
+    for fallback in fallback_dirs:
+        try:
+            os.chdir(fallback)
+            return
+        except (FileNotFoundError, PermissionError, OSError):
+            continue
+
+
+_ensure_accessible_cwd()
 
 try:
     from rich.align import Align
@@ -48,37 +105,6 @@ except ImportError:  # Fallback to stdlib-only behavior when Rich is not install
         def add_row(self, *columns):
             self._rows.append(columns)
 
-from src.cli import parse_args
-from src.config import load_config, save_config
-from src.utils import validate_manga_input, get_slug_and_pretty
-from src.downloader import (
-    download_all_pages,
-    set_clean_output as set_downloader_clean_output,
-    set_dev_mode as set_downloader_dev_mode,
-    set_stop_signal as set_downloader_stop_signal,
-)
-from src.cbz import create_cbz_for_all, set_clean_output as set_cbz_clean_output
-from src.scrapers.generic import (
-    gather_all_urls,
-    set_clean_output as set_generic_clean_output,
-    set_stop_signal as set_generic_stop_signal,
-)
-from src.scrapers.mangadex import (
-    download_md_chapters,
-    set_clean_output as set_md_clean_output,
-    set_stop_signal as set_md_stop_signal,
-)
-from src.scrapers.weebcentral import (
-    fetch_weebcentral_images,
-    set_clean_output as set_weeb_clean_output,
-)
-from src.system_utils import update, credits
-from src.database.manga_db import (
-    get_tracked_manga,
-    has_new_mangadex_release,
-    set_clean_output as set_db_clean_output,
-    set_dev_mode as set_db_dev_mode,
-)
 
 console = Console()
 
