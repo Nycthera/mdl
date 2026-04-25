@@ -387,7 +387,7 @@ def _update_windows(app_path: str, install_root: str, options: dict[str, bool | 
     if options["cli_wrapper"]:
         _install_cli_wrapper_windows(app_path, run_py)
 
-    _print_completion_message("windows", str(options["mode"]))
+    _print_completion_message("windows", str(options["mode"]), install_root)
 
 
 def _update_unix(app_path: str, install_root: str, options: dict[str, bool | str]) -> None:
@@ -446,26 +446,31 @@ def _update_unix(app_path: str, install_root: str, options: dict[str, bool | str
     if options["cli_wrapper"]:
         _install_cli_wrapper_unix(app_path, run_py)
 
-    _print_completion_message("unix", str(options["mode"]))
+    _print_completion_message("unix", str(options["mode"]), install_root)
 
 
-def _print_completion_message(os_name: str, mode: str) -> None:
+def _print_completion_message(os_name: str, mode: str, install_root: str) -> None:
     """Print completion message with next steps."""
+    venv_path = os.path.join(install_root, "venv")
+    app_path = os.path.join(install_root, "app")
+
     mode_line = "[yellow]Mode: user site-packages (no venv)[/]"
     if mode == "venv":
-        mode_line = (
-            "[yellow]Mode: venv (activate with call venv\\Scripts\\activate)[/]"
+        activate_cmd = (
+            f"call {os.path.join(venv_path, 'Scripts', 'activate')}"
             if os_name == "windows"
-            else "[yellow]Mode: venv (activate with source venv/bin/activate)[/]"
+            else f"source {os.path.join(venv_path, 'bin', 'activate')}"
         )
+        mode_line = f"[yellow]Mode: venv (activate with {activate_cmd})[/]"
 
     console.print(Panel(
         "[bold green]✓ Installation Complete![/]\n"
+        f"[cyan]Install location: {install_root}[/]\n"
         "[cyan]Next steps:[/]\n"
         f"{mode_line}\n"
-        "[yellow]1. Run manga downloader: python main.py -M manga-name[/]\n"
+        f"[yellow]1. Run manga downloader: python {os.path.join(app_path, 'main.py')} -M manga-name[/]\n"
         "[yellow]2. (Optional) Start API: cd server && npm start[/]\n"
-        "[cyan]For more info: python main.py --help[/]",
+        f"[cyan]For more info: python {os.path.join(app_path, 'main.py')} --help[/]",
         border_style="green",
         title="[white on green] Ready [/]"
     ))
