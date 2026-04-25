@@ -1,6 +1,9 @@
 @echo off
 setlocal
 
+set "INSTALL_ROOT=%LOCALAPPDATA%\mdl"
+set "APP_PATH=%INSTALL_ROOT%\app"
+
 echo ==========================================
 echo   Manga Downloader - Windows Installer
 echo ==========================================
@@ -8,7 +11,7 @@ echo ==========================================
 echo.
 echo ================= Selection =================
 echo 1^) User site-packages ^(no venv^)
-echo 2^) Project venv ^(./venv^)
+echo 2^) Managed venv ^(%LOCALAPPDATA%\mdl\venv^)
 set "INSTALL_MODE=1"
 set /p INSTALL_MODE=Choose Python install mode [1/2] (default 1): 
 if "%INSTALL_MODE%"=="" set "INSTALL_MODE=1"
@@ -34,15 +37,26 @@ if "%PY_CMD%"=="" (
     exit /b 1
 )
 
+echo Preparing installed app copy...
+if exist "%APP_PATH%" rmdir /s /q "%APP_PATH%"
+mkdir "%APP_PATH%"
+copy /Y "main.py" "%APP_PATH%\main.py" >nul
+copy /Y "requirements.txt" "%APP_PATH%\requirements.txt" >nul
+xcopy /E /I /Y "src" "%APP_PATH%\src" >nul
+if /I "%INSTALL_NODE%"=="Y" if exist "server" (
+    xcopy /E /I /Y "server" "%APP_PATH%\server" >nul
+    if exist "%APP_PATH%\server\node_modules" rmdir /s /q "%APP_PATH%\server\node_modules"
+)
+
 set "RUN_PY=%PY_CMD%"
 set "RUN_PY_IS_PATH=N"
 if "%INSTALL_MODE%"=="2" (
-    if not exist venv (
+    if not exist "%INSTALL_ROOT%\venv" (
         echo Creating virtual environment...
-        %PY_CMD% -m venv venv
+        %PY_CMD% -m venv "%INSTALL_ROOT%\venv"
         if %errorlevel% neq 0 exit /b 1
     )
-    set "RUN_PY=%CD%\venv\Scripts\python.exe"
+    set "RUN_PY=%INSTALL_ROOT%\venv\Scripts\python.exe"
     set "RUN_PY_IS_PATH=Y"
 )
 
@@ -55,9 +69,9 @@ if /I "%INSTALL_PYTHON%"=="Y" (
     if %errorlevel% neq 0 exit /b 1
 
     if "%INSTALL_MODE%"=="2" (
-        "%RUN_PY%" -m pip install -r requirements.txt
+        "%RUN_PY%" -m pip install -r "%APP_PATH%\requirements.txt"
     ) else (
-        %RUN_PY% -m pip install --user -r requirements.txt
+        %RUN_PY% -m pip install --user -r "%APP_PATH%\requirements.txt"
     )
     if %errorlevel% neq 0 exit /b 1
 )
@@ -73,10 +87,10 @@ if /I "%INSTALL_PLAYWRIGHT%"=="Y" (
 
 REM Setup API server (optional)
 if /I "%INSTALL_NODE%"=="Y" (
-    if exist server\package.json (
+    if exist "%APP_PATH%\server\package.json" (
         where npm >nul 2>nul
         if %errorlevel% equ 0 (
-            pushd server
+            pushd "%APP_PATH%\server"
             npm install
             popd
         ) else (
@@ -102,9 +116,9 @@ if /I "%INSTALL_CLI%"=="Y" (
     (
         echo @echo off
         if "%RUN_PY_IS_PATH%"=="Y" (
-            echo "%RUN_PY%" "%CD%\main.py" %%*
+            echo "%RUN_PY%" "%APP_PATH%\main.py" %%*
         ) else (
-            echo %RUN_PY% "%CD%\main.py" %%*
+            echo %RUN_PY% "%APP_PATH%\main.py" %%*
         )
     ) > "%USER_BIN%\mdl.cmd"
 )
@@ -112,11 +126,12 @@ if /I "%INSTALL_CLI%"=="Y" (
 echo.
 echo Installation complete!
 if "%INSTALL_MODE%"=="2" (
-    echo Mode: venv ^(%CD%\venv^)
-    echo Activate with: call venv\Scripts\activate
+    echo Mode: managed venv ^(%INSTALL_ROOT%\venv^)
+    echo Activate with: call %INSTALL_ROOT%\venv\Scripts\activate
 ) else (
     echo Mode: user site-packages ^(no venv^)
 )
+echo Installed app path: %APP_PATH%
 if /I "%INSTALL_CLI%"=="Y" (
     echo CLI wrapper created at: %USERPROFILE%\bin\mdl.cmd
     echo To use CLI globally:

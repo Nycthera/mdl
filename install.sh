@@ -4,6 +4,8 @@ set -euo pipefail
 
 base_path=$(pwd)
 echo "Base path is $base_path"
+install_root="$HOME/.local/share/mdl"
+app_path="$install_root/app"
 
 ask_yes_no() {
     local prompt="$1"
@@ -30,7 +32,7 @@ ask_yes_no() {
 echo ""
 echo "=== MDL Install Selection ==="
 echo "1) User site-packages (no venv)"
-echo "2) Project venv (./venv)"
+echo "2) Managed venv (~/.local/share/mdl/venv)"
 read -r -p "Choose Python install mode [1/2] (default 1): " install_mode
 install_mode=${install_mode:-1}
 
@@ -49,13 +51,24 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
+echo "Preparing installed app copy..."
+rm -rf "$app_path"
+mkdir -p "$app_path"
+cp "$base_path/main.py" "$app_path/main.py"
+cp "$base_path/requirements.txt" "$app_path/requirements.txt"
+cp -R "$base_path/src" "$app_path/src"
+if [ "$install_node" = true ] && [ -d "$base_path/server" ]; then
+    cp -R "$base_path/server" "$app_path/server"
+    rm -rf "$app_path/server/node_modules"
+fi
+
 run_py="python3"
 if [ "$install_mode" = "2" ]; then
-    if [ ! -d "$base_path/venv" ]; then
+    if [ ! -d "$install_root/venv" ]; then
         echo "Creating virtual environment..."
-        python3 -m venv "$base_path/venv"
+        python3 -m venv "$install_root/venv"
     fi
-    run_py="$base_path/venv/bin/python"
+    run_py="$install_root/venv/bin/python"
 fi
 
 if [ "$install_python_deps" = true ]; then
@@ -63,9 +76,9 @@ if [ "$install_python_deps" = true ]; then
         "$run_py" -m pip install --upgrade pip
     fi
     if [ "$install_mode" = "2" ]; then
-        "$run_py" -m pip install -r "$base_path/requirements.txt"
+        "$run_py" -m pip install -r "$app_path/requirements.txt"
     else
-        "$run_py" -m pip install --user -r "$base_path/requirements.txt"
+        "$run_py" -m pip install --user -r "$app_path/requirements.txt"
     fi
 fi
 
@@ -77,7 +90,7 @@ if [ "$install_node" = true ]; then
     echo "Setting up API server (server/, Node.js, optional)..."
     if [ -d "$base_path/server" ] && [ -f "$base_path/server/package.json" ]; then
         if command -v npm >/dev/null 2>&1; then
-            (cd "$base_path/server" && npm install)
+            (cd "$app_path/server" && npm install)
         else
             echo "Warning: npm not found. Skipping server/ dependency install."
         fi
@@ -93,7 +106,7 @@ if [ "$install_cli" = true ]; then
 
     cat > "$user_bin/mdl" <<EOF
 #!/bin/bash
-exec "$run_py" "$base_path/main.py" "\$@"
+exec "$run_py" "$app_path/main.py" "\$@"
 EOF
     chmod +x "$user_bin/mdl"
 fi
@@ -101,11 +114,12 @@ fi
 echo ""
 echo "Installation complete!"
 if [ "$install_mode" = "2" ]; then
-    echo "Mode: venv ($base_path/venv)"
-    echo "Activate with: source venv/bin/activate"
+    echo "Mode: managed venv ($install_root/venv)"
+    echo "Activate with: source $install_root/venv/bin/activate"
 else
     echo "Mode: user site-packages (no venv)"
 fi
+echo "Installed app path: $app_path"
 if [ "$install_cli" = true ]; then
     echo "CLI installed at: $HOME/.local/bin/mdl"
     echo "If needed, add to PATH: export PATH=\"$HOME/.local/bin:\$PATH\""
