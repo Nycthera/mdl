@@ -325,12 +325,12 @@ def update() -> None:
         return
 
     if os_name == "windows":
-        _update_windows(base_path, app_path, install_root, options)
+        _update_windows(app_path, install_root, options)
     else:
-        _update_unix(base_path, app_path, install_root, options)
+        _update_unix(app_path, install_root, options)
 
 
-def _update_windows(base_path: str, app_path: str, install_root: str, options: dict[str, bool | str]) -> None:
+def _update_windows(app_path: str, install_root: str, options: dict[str, bool | str]) -> None:
     """Update dependencies on Windows."""
     console.print("\n[bold cyan]Setting up for Windows...[/]\n")
     
