@@ -13,6 +13,7 @@ from rich.console import Console
 from src.downloader import download_all_pages
 from src.cbz import create_cbz_for_all
 from src.database.manga_db import record_download
+from src.http import DEFAULT_TIMEOUT, HEAD_TIMEOUT, classify_failure, compute_backoff, get_default_timeout
 from src.rate_limiter import rate_limiter_athome
 from src.utils import sanitize_folder_name
 
@@ -60,11 +61,19 @@ async def fetch_all_chapters_md(
     manga_uuid: str,
     lang: str = "en",
     session: Optional[aiohttp.ClientSession] = None,
+    max_retries: int = 5,
 ) -> List[Dict[str, Any]]:
-    """Fetch all chapters for a manga from MangaDex."""
+    """Fetch all chapters for a manga from MangaDex.
+
+    Uses the shared classified-retry policy: 429 backs off 3-12s with jitter,
+    5xx uses exponential backoff, 4xx fails fast. Every GET has a real
+    ClientTimeout (was previously unbounded — could hang forever).
+    """
     if session is None:
         async with aiohttp.ClientSession() as session:
-            return await fetch_all_chapters_md(manga_uuid, lang=lang, session=session)
+            return await fetch_all_chapters_md(
+                manga_uuid, lang=lang, session=session, max_retries=max_retries
+            )
 
     chapters = []
     limit = 100
@@ -79,23 +88,50 @@ async def fetch_all_chapters_md(
             "offset": offset,
             "order[chapter]": "asc",
         }
-        async with session.get(f"{API_ENDPOINT}/chapter", params=params) as resp:
-            if resp.status == 429:
-                console.print(
-                    "[yellow]Rate limited by MangaDex, sleeping 5 seconds...[/]"
-                )
-                await asyncio.sleep(5)
-                continue
-            elif resp.status != 200:
-                console.print(f"[red]Error fetching chapters: {resp.status}[/]")
-                break
-            data = await resp.json()
-            batch = data.get("data", [])
-            chapters.extend(batch)
-            total = data.get("total", 0)
-            if offset + limit >= total:
-                break
-            offset += limit
+        last_status: Optional[int] = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                async with session.get(
+                    f"{API_ENDPOINT}/chapter",
+                    params=params,
+                    timeout=get_default_timeout(),
+                ) as resp:
+                    last_status = resp.status
+                    if resp.status == 429:
+                        wait = compute_backoff("rate_limit", attempt)
+                        console.print(
+                            f"[yellow]Rate limited by MangaDex, sleeping {wait:.1f}s...[/]"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+                    if resp.status != 200:
+                        cls = classify_failure(resp.status)
+                        if cls == "permanent" or attempt == max_retries:
+                            console.print(
+                                f"[red]Error fetching chapters: {resp.status}[/]"
+                            )
+                            return chapters
+                        await asyncio.sleep(compute_backoff(cls, attempt))
+                        continue
+                    data = await resp.json()
+                    break
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                if attempt == max_retries:
+                    console.print(
+                        f"[red]Network error fetching chapters: {e}[/]"
+                    )
+                    return chapters
+                await asyncio.sleep(compute_backoff("retryable", attempt))
+        else:
+            # Retry loop exhausted without break — bail out.
+            break
+
+        batch = data.get("data", [])
+        chapters.extend(batch)
+        total = data.get("total", 0)
+        if offset + limit >= total:
+            break
+        offset += limit
     return chapters
 
 
@@ -105,7 +141,11 @@ async def get_images_md(
     max_retries: int = 5,
     session: Optional[aiohttp.ClientSession] = None,
 ) -> List[str]:
-    """Fetch image URLs for a specific chapter."""
+    """Fetch image URLs for a specific chapter.
+
+    Uses classified retry + bounded exponential backoff with jitter.
+    Adds a real ClientTimeout to the at-home server GET (was unbounded).
+    """
     if session is None:
         async with aiohttp.ClientSession() as session:
             return await get_images_md(
@@ -115,29 +155,42 @@ async def get_images_md(
                 session=session,
             )
 
-    for attempt in range(max_retries):
+    for attempt in range(1, max_retries + 1):
         await rate_limiter_athome.acquire("mangadex_athome")
-        async with session.get(
-            f"https://api.mangadex.org/at-home/server/{chapter_id}"
-        ) as resp:
-            if resp.status == 429:
-                wait = (attempt + 1) * 5
-                console.print(f"[yellow]Rate limited. Waiting {wait}s...[/]")
-                await asyncio.sleep(wait)
-                continue
-            elif resp.status != 200:
+        try:
+            async with session.get(
+                f"https://api.mangadex.org/at-home/server/{chapter_id}",
+                timeout=get_default_timeout(),
+            ) as resp:
+                if resp.status == 429:
+                    wait = compute_backoff("rate_limit", attempt)
+                    console.print(f"[yellow]Rate limited. Waiting {wait:.1f}s...[/]")
+                    await asyncio.sleep(wait)
+                    continue
+                if resp.status != 200:
+                    cls = classify_failure(resp.status)
+                    if cls == "permanent" or attempt == max_retries:
+                        console.print(
+                            f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]"
+                        )
+                        return []
+                    await asyncio.sleep(compute_backoff(cls, attempt))
+                    continue
+                data = await resp.json()
+                chapter_data = data.get("chapter", {})
+                base_url = data.get("baseUrl")
+                hash_code = chapter_data.get("hash")
+                pages = chapter_data.get("dataSaver" if use_saver else "data", [])
+                if not base_url or not hash_code or not pages:
+                    return []
+                return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            if attempt == max_retries:
                 console.print(
-                    f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]"
+                    f"[red]Network error fetching chapter {chapter_id}: {e}[/]"
                 )
                 return []
-            data = await resp.json()
-            chapter_data = data.get("chapter", {})
-            base_url = data.get("baseUrl")
-            hash_code = chapter_data.get("hash")
-            pages = chapter_data.get("dataSaver" if use_saver else "data", [])
-            if not base_url or not hash_code or not pages:
-                return []
-            return [f"{base_url}/data/{hash_code}/{page}" for page in pages]
+            await asyncio.sleep(compute_backoff("retryable", attempt))
     return []
 
 
@@ -145,29 +198,46 @@ async def get_manga_name_from_md(
     manga_url: str,
     lang: str = "en",
     session: Optional[aiohttp.ClientSession] = None,
+    max_retries: int = 3,
 ) -> str:
     """Get manga title from MangaDex API."""
     from src.utils import extract_manga_name_from_url
-    
+
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         return extract_manga_name_from_url(manga_url)
     if session is None:
         async with aiohttp.ClientSession() as session:
-            return await get_manga_name_from_md(manga_url, lang=lang, session=session)
-    async with session.get(f"{API_ENDPOINT}/manga/{manga_uuid}") as resp:
-        if resp.status != 200:
-            return extract_manga_name_from_url(manga_url)
-        data = await resp.json()
-        data_obj = data.get("data", {})
-        attributes = data_obj.get("attributes", {})
-        title_dict = attributes.get("title", {})
-        return (
-            title_dict.get(lang)
-            or title_dict.get("en")
-            or next(iter(title_dict.values()), None)
-            or extract_manga_name_from_url(manga_url)
-        )
+            return await get_manga_name_from_md(
+                manga_url, lang=lang, session=session, max_retries=max_retries
+            )
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with session.get(
+                f"{API_ENDPOINT}/manga/{manga_uuid}",
+                timeout=get_default_timeout(),
+            ) as resp:
+                if resp.status != 200:
+                    cls = classify_failure(resp.status)
+                    if cls == "permanent" or attempt == max_retries:
+                        return extract_manga_name_from_url(manga_url)
+                    await asyncio.sleep(compute_backoff(cls, attempt))
+                    continue
+                data = await resp.json()
+                data_obj = data.get("data", {})
+                attributes = data_obj.get("attributes", {})
+                title_dict = attributes.get("title", {})
+                return (
+                    title_dict.get(lang)
+                    or title_dict.get("en")
+                    or next(iter(title_dict.values()), None)
+                    or extract_manga_name_from_url(manga_url)
+                )
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            if attempt == max_retries:
+                return extract_manga_name_from_url(manga_url)
+            await asyncio.sleep(compute_backoff("retryable", attempt))
+    return extract_manga_name_from_url(manga_url)
 
 
 async def download_md_chapters(
@@ -175,15 +245,24 @@ async def download_md_chapters(
     lang: str = "en",
     use_saver: bool = False,
     create_cbz: bool = True,
+    max_workers: int = 10,
 ) -> None:
-    """Download all chapters from a MangaDex manga."""
+    """Download all chapters from a MangaDex manga.
+
+    `max_workers` controls per-chapter image download concurrency. Was
+    previously hardcoded to 10; now respects the CLI --workers flag.
+    """
     # Extract UUID and clean manga title
     manga_uuid = extract_manga_uuid(manga_url)
     if not manga_uuid:
         console.print("[red]Could not extract manga UUID from URL[/]")
         return
 
-    async with aiohttp.ClientSession() as session:
+    # Single shared session across all MangaDex API + at-home calls —
+    # HTTP keep-alive amortizes TLS handshakes across the whole run.
+    from src.downloader import _build_connector
+    connector = _build_connector(max_workers)
+    async with aiohttp.ClientSession(connector=connector) as session:
         manga_name_clean = await get_manga_name_from_md(
             manga_url, lang=lang, session=session
         )
@@ -240,7 +319,7 @@ async def download_md_chapters(
             urls_to_download = [(url, chapter_folder) for url in images]
             await download_all_pages(
                 urls_to_download,
-                max_workers=10,
+                max_workers=max_workers,
                 manga_name=manga_name_clean,
                 track_to_db=False,
             )
@@ -257,10 +336,12 @@ async def download_md_chapters(
                     )
                 os.rmdir(chapter_folder)
 
-        # Create CBZ from the manga root folder
+        # Create CBZ from the manga root folder.
+        # zipfile + shutil.rmtree are synchronous — run them in a thread so
+        # the event loop is not blocked during CBZ packaging.
         cbz_path = None
         if create_cbz:
-            cbz_path = create_cbz_for_all(manga_root_folder)
+            cbz_path = await asyncio.to_thread(create_cbz_for_all, manga_root_folder)
             if cbz_path and not CLEAN_OUTPUT:
                 console.print(
                     f"[bold green]CBZ created successfully:[/] [cyan]{cbz_path}[/]"
@@ -277,7 +358,10 @@ async def download_md_chapters(
             print(msg)
 
         if total_pages_downloaded > 0:
-            record_download(
+            # SQLite writes are synchronous — run in a thread to avoid
+            # blocking the event loop during the DB write.
+            await asyncio.to_thread(
+                record_download,
                 manga_name=manga_name_clean,
                 latest_chapter_local=latest_chapter_local,
                 latest_chapter_from_mangadex=latest_chapter_from_mangadex,

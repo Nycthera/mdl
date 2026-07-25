@@ -77,6 +77,10 @@ python main.py --update
 
 The updater shows a selection screen so you can choose Python mode (user/venv) and optional components.
 
+### Web Dashboard
+
+The repository also includes a Django web app in [mdl-website/README.md](mdl-website/README.md) with login, signup, a protected dashboard, and JSON endpoints backed by Django's built-in auth database.
+
 #### Option 2: Manual Setup
 
 ```bash
