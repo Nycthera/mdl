@@ -5,7 +5,7 @@ import re
 from typing import List, Tuple
 from urllib.parse import urljoin
 
-from playwright.async_api import async_playwright
+from playwright.async_api import Error as PlaywrightError, async_playwright
 from playwright_stealth import Stealth
 from rich.console import Console
 from rich.panel import Panel
@@ -65,7 +65,7 @@ async def fetch_weebcentral_images(url: str) -> Tuple[List[str], str]:
                 browser = await engine.launch(headless=True, args=[])
                 browser_name = name
                 break
-            except Exception as e:
+            except PlaywrightError as e:
                 if not CLEAN_OUTPUT:
                     console.print(f"[yellow]{name} failed: {e}[/]")
 
@@ -88,7 +88,7 @@ async def fetch_weebcentral_images(url: str) -> Tuple[List[str], str]:
                             f"[red] Failed to load page (status {response.status if response else 0})[/]"
                         )
                     return [], "Unknown_Title"
-            except Exception as e:
+            except PlaywrightError as e:
                 if not CLEAN_OUTPUT:
                     console.print(f"[red] Page load warning: {e}[/]")
                 return [], "Unknown_Title"

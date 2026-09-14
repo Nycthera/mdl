@@ -112,5 +112,5 @@ def safe_delete_folder(folder_path: str) -> None:
     try:
         shutil.rmtree(folder)
         console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
-    except Exception as e:
+    except OSError as e:
         console.print(f"[red]Failed to delete {folder_path}: {e}[/]")

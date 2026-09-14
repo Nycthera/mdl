@@ -81,7 +81,7 @@ def create_cbz_for_all(folder_path: str) -> str | None:
                 shutil.rmtree(item_path)
                 if not CLEAN_OUTPUT:
                     console.print(f"[green]Deleted folder {item_path}[/]")
-            except Exception as e:
+            except OSError as e:
                 if not CLEAN_OUTPUT:
                     console.print(f"[red]Failed to delete {item_path}: {e}[/]")
 

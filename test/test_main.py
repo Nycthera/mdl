@@ -388,7 +388,7 @@ async def test_gather_all_urls_probes_decimal_chapters_after_integer(monkeypatch
             return None
 
     async def fake_url_exists(session, url):
-        return url.endswith("/0007-001.png") or url.endswith("/0007.5-001.png")
+        return url.endswith(("/0007-001.png", "/0007.5-001.png"))
 
     async def fake_collect(
         manga_name,
