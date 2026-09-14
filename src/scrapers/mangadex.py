@@ -39,20 +39,17 @@ def set_stop_signal(value: bool) -> None:
 
 def extract_manga_uuid(url: str) -> Optional[str]:
     """Extract MangaDex UUID from URL."""
-    try:
-        path = urlparse(url).path.strip("/")
-        parts = path.split("/")
-        if len(parts) >= 2 and parts[0] == "title":
-            candidate_id = parts[1]
-            try:
-                # Validate that the extracted ID is a proper UUID
-                uuid.UUID(candidate_id)
-                return candidate_id
-            except ValueError:
-                # Not a valid UUID; fall through to return None
-                pass
-    except Exception:
-        pass
+    path = urlparse(url).path.strip("/")
+    parts = path.split("/")
+    if len(parts) >= 2 and parts[0] == "title":
+        candidate_id = parts[1]
+        try:
+            # Validate that the extracted ID is a proper UUID
+            uuid.UUID(candidate_id)
+            return candidate_id
+        except ValueError:
+            # Not a valid UUID; fall through to return None
+            pass
     return None
 
 
@@ -63,8 +60,8 @@ async def fetch_all_chapters_md(
 ) -> List[Dict[str, Any]]:
     """Fetch all chapters for a manga from MangaDex."""
     if session is None:
-        async with aiohttp.ClientSession() as session:
-            return await fetch_all_chapters_md(manga_uuid, lang=lang, session=session)
+        async with aiohttp.ClientSession() as temp_session:
+            return await fetch_all_chapters_md(manga_uuid, lang=lang, session=temp_session)
 
     chapters = []
     limit = 100
@@ -107,12 +104,12 @@ async def get_images_md(
 ) -> List[str]:
     """Fetch image URLs for a specific chapter."""
     if session is None:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession() as temp_session:
             return await get_images_md(
                 chapter_id,
                 use_saver=use_saver,
                 max_retries=max_retries,
-                session=session,
+                session=temp_session,
             )
 
     for attempt in range(max_retries):
@@ -153,8 +150,8 @@ async def get_manga_name_from_md(
     if not manga_uuid:
         return extract_manga_name_from_url(manga_url)
     if session is None:
-        async with aiohttp.ClientSession() as session:
-            return await get_manga_name_from_md(manga_url, lang=lang, session=session)
+        async with aiohttp.ClientSession() as temp_session:
+            return await get_manga_name_from_md(manga_url, lang=lang, session=temp_session)
     async with session.get(f"{API_ENDPOINT}/manga/{manga_uuid}") as resp:
         if resp.status != 200:
             return extract_manga_name_from_url(manga_url)

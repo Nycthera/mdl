@@ -12,7 +12,7 @@ try:
     from rich.console import Console
     from rich.panel import Panel
     from rich.table import Table
-except Exception:  # ImportError and any other issues loading Rich
+except ImportError:
     Console = None  # type: ignore[assignment]
     Panel = None  # type: ignore[assignment]
     Table = None  # type: ignore[assignment]
@@ -118,7 +118,7 @@ def _run_command(
         console.print(f"[red]✗ Command failed: {display}[/]")
         console.print(f"[red]  Error: {e}[/]")
         return False
-    except Exception as e:
+    except OSError as e:
         console.print(f"[red]✗ Unexpected error: {e}[/]")
         return False
 
@@ -182,9 +182,10 @@ def _setup_windows_python(mode: str, base_path: str, py_cmd: List[str]) -> List[
     """Prepare Python argv list for Windows according to selected mode."""
     if mode == "venv":
         venv_path = os.path.join(base_path, "venv")
-        if not os.path.exists(venv_path):
-            if not _run_command([*py_cmd, "-m", "venv", venv_path], "Creating virtual environment"):
-                return None
+        if not os.path.exists(venv_path) and not _run_command(
+            [*py_cmd, "-m", "venv", venv_path], "Creating virtual environment"
+        ):
+            return None
         python_exe = os.path.join(venv_path, "Scripts", "python.exe")
         return [python_exe]
     return py_cmd
@@ -194,9 +195,10 @@ def _setup_unix_python(mode: str, base_path: str) -> List[str] | None:
     """Prepare Python argv list for Unix according to selected mode."""
     if mode == "venv":
         venv_path = os.path.join(base_path, "venv")
-        if not os.path.exists(venv_path):
-            if not _run_command(["python3", "-m", "venv", venv_path], "Creating virtual environment"):
-                return None
+        if not os.path.exists(venv_path) and not _run_command(
+            ["python3", "-m", "venv", venv_path], "Creating virtual environment"
+        ):
+            return None
         python_exe = os.path.join(venv_path, "bin", "python")
         return [python_exe]
     return ["python3"]
@@ -405,4 +407,3 @@ def _print_completion_message(os_name: str, mode: str) -> None:
         border_style="green",
         title="[white on green] Ready [/]"
     ))
-

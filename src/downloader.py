@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import sqlite3
 from collections import defaultdict
 from typing import List, Tuple
 
@@ -20,6 +21,12 @@ from src.database.manga_db import record_download_from_folders
 from src.utils import Colors, _loop_time, _cancel_pending_tasks
 
 console = Console()
+
+def _write_bytes(filepath: str, content: bytes) -> None:
+    """Write bytes to disk."""
+    with open(filepath, "wb") as file:
+        file.write(content)
+
 
 # Global state for interruption handling
 stop_signal = False
@@ -54,7 +61,7 @@ async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
             timeout=aiohttp.ClientTimeout(total=5),
         ) as response:
             return response.status == 200
-    except Exception:
+    except (aiohttp.ClientError, asyncio.TimeoutError):
         return False
 
 
@@ -81,14 +88,13 @@ async def download_image(
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
                 r.raise_for_status()
                 content = await r.read()
-                with open(filepath, "wb") as f:
-                    f.write(content)
+                await asyncio.to_thread(_write_bytes, filepath, content)
             return f"{Colors.GREEN}Saved as {filepath}{Colors.RESET}"
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             if attempt == max_retries:
                 return f"{Colors.RED}Failed to download {filename} after {max_retries} attempts: {e}{Colors.RESET}"
             await asyncio.sleep(backoff_factor * attempt)
-        except Exception as e:
+        except OSError as e:
             return f"{Colors.RED}Unexpected error for {filename}: {e}{Colors.RESET}"
 
 
@@ -179,11 +185,9 @@ async def download_all_pages(
                 )
 
                 start_time = _loop_time()
-                completed = 0
-                for future in asyncio.as_completed(tasks):
+                for completed, future in enumerate(asyncio.as_completed(tasks), start=1):
                     item, result = await future
                     page_results[item] = result
-                    completed += 1
                     if stop_signal:
                         await _cancel_pending_tasks(tasks)
                         break
@@ -220,7 +224,7 @@ async def download_all_pages(
                 console.print(
                     f"[bold blue][db][/bold blue] Downloader save finished for '{manga_name}'"
                 )
-        except Exception:
+        except sqlite3.Error:
             # DB tracking should not block downloads.
             if not CLEAN_OUTPUT:
                 console.print(

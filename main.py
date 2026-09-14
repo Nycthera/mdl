@@ -245,15 +245,17 @@ async def _auto_update_from_db(
         )
         updated += 1
 
-        if cbz_flag and not stop_signal:
-            if os.path.isdir(pretty_name) and any(
-                f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
-            ):
-                cbz_created_path = create_cbz_for_all(pretty_name)
-                if cbz_created_path and not CLEAN_OUTPUT:
-                    console.print(
-                        f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
-                    )
+        if (
+            cbz_flag
+            and not stop_signal
+            and os.path.isdir(pretty_name)
+            and any(f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz"))
+        ):
+            cbz_created_path = create_cbz_for_all(pretty_name)
+            if cbz_created_path and not CLEAN_OUTPUT:
+                console.print(
+                    f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
+                )
 
     if not CLEAN_OUTPUT:
         console.print(
@@ -444,4 +446,3 @@ if __name__ == "__main__":
 \033[0m
 """)
     asyncio.run(main())
-
