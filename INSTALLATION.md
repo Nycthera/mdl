@@ -1,7 +1,7 @@
 # Installation & Setup Guide
 
-Version: 3.5.0
-Updated: March 2026
+Application version: see [src/__init__.py](src/__init__.py).
+Published versions: [GitHub Releases](https://github.com/Nycthera/mdl/releases).
 
 Installers now open a selection screen so you can choose what to install:
 
@@ -31,6 +31,61 @@ What this does:
 - Installs selected dependencies and tools
 
 ## Script Installers
+
+### Single-file Python command (macOS/Linux)
+
+From a complete checkout, run with Python 3.13+:
+
+```bash
+python3 install_single.py
+```
+
+This collects `main.py` and every `src/**/*.py` file into an executable
+`~/.local/bin/mdl.py`, with a `mdl` symlink beside it. It installs the dependencies
+from `requirements.txt` into `~/.local/share/mdl/venv` and checks that the bundle
+starts before installing it. The command works after moving or deleting the
+checkout; keep the virtual environment and its Python installation in place.
+Add `~/.local/bin` to your PATH if needed.
+
+```bash
+# Include Chromium for browser-based sources
+python3 install_single.py --playwright
+
+# Build only: creates dist/mdl.py without installing dependencies
+python3 install_single.py --build-only
+
+# Use the invoking Python and its already-installed dependencies
+python3 install_single.py --skip-deps
+
+# Choose another writable command directory
+python3 install_single.py --bin-dir /usr/local/bin
+```
+
+If `/usr/local/bin` requires administrator access, first install normally, then
+copy the verified file and create the command (check for an existing `mdl` first):
+
+```bash
+sudo install -m 755 "$HOME/.local/bin/mdl.py" /usr/local/bin/mdl.py
+sudo ln -s mdl.py /usr/local/bin/mdl
+```
+
+That copied command still uses your user's virtual environment. For a shared
+installation, an administrator must choose a shared `--venv-dir` and `--bin-dir`.
+The generated file embeds application source and the license; Python, external
+packages, Playwright browsers, and the optional Node server are not embedded.
+Build-only output uses `python3` from PATH; installed output pins its interpreter.
+Interpreter paths containing whitespace or longer than 120 bytes are rejected.
+
+The bundled `mdl --update` prints rebuild instructions. To update, pull the source
+and rerun the installer with the same options. Existing unrelated `mdl` commands
+are preserved; select another `--bin-dir` if one already exists. Configuration and
+the database continue to use their existing user locations; legacy databases
+inside the checkout are not bundled or migrated by this installer.
+
+Implementation references: Python's documented
+[import hooks](https://docs.python.org/3/library/importlib.html) preserve module
+namespaces, and [virtual environments](https://docs.python.org/3/library/venv.html)
+provide dependencies without modifying system Python.
 
 ### macOS/Linux
 
