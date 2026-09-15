@@ -5,14 +5,13 @@ import argparse
 import ast
 import hashlib
 import os
-from pathlib import Path
 import re
 import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "src" / "__init__.py"
@@ -30,8 +29,10 @@ def read_version(path: Path = VERSION_FILE) -> str:
         ast.literal_eval(node.value)
         for node in tree.body
         if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "__version__"
-                for target in node.targets)
+        and any(
+            isinstance(target, ast.Name) and target.id == "__version__"
+            for target in node.targets
+        )
     ]
     if len(values) != 1 or not isinstance(values[0], str):
         raise ValueError("src/__init__.py must define one literal __version__ string")
@@ -39,8 +40,10 @@ def read_version(path: Path = VERSION_FILE) -> str:
     match = VERSION_PATTERN.fullmatch(version)
     if not match:
         raise ValueError(f"Invalid version {version!r}; use X.Y.Z or X.Y.Z-rc.1")
-    if match[1] and any(part.isdigit() and len(part) > 1 and part.startswith("0")
-                        for part in match[1].split(".")):
+    if match[1] and any(
+        part.isdigit() and len(part) > 1 and part.startswith("0")
+        for part in match[1].split(".")
+    ):
         raise ValueError("Numeric prerelease identifiers cannot have leading zeros")
     return version
 
@@ -48,7 +51,9 @@ def read_version(path: Path = VERSION_FILE) -> str:
 def validate_tag(version: str, tag: str) -> None:
     expected = f"v{version}"
     if tag != expected:
-        raise ValueError(f"Tag {tag!r} does not match __version__={version!r}; expected {expected!r}")
+        raise ValueError(
+            f"Tag {tag!r} does not match __version__={version!r}; expected {expected!r}"
+        )
 
 
 def build_assets(output: Path, version: str) -> None:
@@ -65,13 +70,22 @@ def build_assets(output: Path, version: str) -> None:
         env["HOME"] = str(Path(directory) / "home")
         result = subprocess.run(
             [sys.executable, "-I", str(isolated), "--clean-output", "--version"],
-            cwd=directory, env=env, check=True, capture_output=True, text=True,
+            cwd=directory,
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         # First-run config creation may print a message before argparse's version.
         if result.stdout.strip().splitlines()[-1] != f"mdl.py {version}":
             raise ValueError(f"Bundle reports an unexpected version: {result.stdout!r}")
-        subprocess.run([sys.executable, "-I", str(isolated), "--help"],
-                       cwd=directory, env=env, check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(
+            [sys.executable, "-I", str(isolated), "--help"],
+            cwd=directory,
+            env=env,
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
     for name in ("requirements.txt", "LICENSE"):
         shutil.copyfile(ROOT / name, output / name)
     (output / "INSTALL.txt").write_text(
@@ -90,10 +104,16 @@ def build_assets(output: Path, version: str) -> None:
         "Keep that environment active when invoking the installed command.\n",
         encoding="utf-8",
     )
-    assets = [output / name for name in ("mdl.py", "requirements.txt", "LICENSE", "INSTALL.txt")]
+    assets = [
+        output / name
+        for name in ("mdl.py", "requirements.txt", "LICENSE", "INSTALL.txt")
+    ]
     (output / "SHA256SUMS").write_text(
-        "".join(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
-                for path in assets), encoding="utf-8",
+        "".join(
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+            for path in assets
+        ),
+        encoding="utf-8",
     )
 
 
@@ -111,8 +131,14 @@ def main() -> None:
         build_assets(args.output_dir.resolve(), version)
     if args.github_output:
         with args.github_output.open("a", encoding="utf-8") as stream:
-            stream.write(f"version={version}\ntag=v{version}\nprerelease={str('-' in version).lower()}\n")
-    print(f"Validated MDL v{version}" if args.check_only else f"Built MDL v{version}: {args.output_dir}")
+            stream.write(
+                f"version={version}\ntag=v{version}\nprerelease={str('-' in version).lower()}\n"
+            )
+    print(
+        f"Validated MDL v{version}"
+        if args.check_only
+        else f"Built MDL v{version}: {args.output_dir}"
+    )
 
 
 if __name__ == "__main__":

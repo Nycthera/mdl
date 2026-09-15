@@ -1,13 +1,12 @@
 """Integration checks for the single-file distribution, outside the checkout."""
 
 import os
-from pathlib import Path
 import runpy
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 build = runpy.run_path(str(ROOT / "install_single.py"))["build"]
@@ -24,8 +23,14 @@ def run_bundle(bundle, *arguments):
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env["HOME"] = str(bundle.parent / "home")
-    return subprocess.run([str(bundle), *arguments], cwd=bundle.parent,
-                          env=env, text=True, capture_output=True, check=True)
+    return subprocess.run(
+        [str(bundle), *arguments],
+        cwd=bundle.parent,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
 
 
 def test_deterministic_and_complete(bundle, tmp_path):
@@ -46,7 +51,7 @@ def test_cli_without_checkout(bundle):
 
 
 def test_imports_keep_separate_globals(bundle):
-    code = '''
+    code = """
 import runpy, sys
 data = runpy.run_path(sys.argv[1])
 sys.meta_path.insert(0, data['_EmbeddedModules']())
@@ -58,28 +63,53 @@ downloader.set_clean_output(True)
 assert downloader.CLEAN_OUTPUT is True
 assert cbz.CLEAN_OUTPUT is False
 assert db.has_new_mangadex_release(1, 2)
-'''
+"""
     env = os.environ.copy()
     env["HOME"] = str(bundle.parent / "home")
-    subprocess.run([sys.executable, "-I", "-c", code, str(bundle)],
-                   cwd=bundle.parent, env=env, check=True)
+    subprocess.run(
+        [sys.executable, "-I", "-c", code, str(bundle)],
+        cwd=bundle.parent,
+        env=env,
+        check=True,
+    )
 
 
 def test_install_and_reinstall(tmp_path):
     destination = tmp_path / "bin with spaces"
-    args = [sys.executable, str(ROOT / "install_single.py"), "--skip-deps",
-            "--bin-dir", str(destination)]
+    args = [
+        sys.executable,
+        str(ROOT / "install_single.py"),
+        "--skip-deps",
+        "--bin-dir",
+        str(destination),
+    ]
     for _ in range(2):
         subprocess.run(args, cwd=tmp_path, check=True, capture_output=True)
         assert (destination / "mdl").is_symlink()
         assert "--workers" in run_bundle(destination / "mdl", "--help").stdout
 
 
-def test_preserve_existing_command(tmp_path):
-    (tmp_path / "mdl").write_text("existing command")
-    result = subprocess.run([sys.executable, str(ROOT / "install_single.py"),
-                             "--skip-deps", "--bin-dir", str(tmp_path)],
-                            text=True, capture_output=True)
+@pytest.mark.parametrize("broken_symlink", [False, True])
+def test_preserve_existing_command(tmp_path, broken_symlink):
+    if broken_symlink:
+        (tmp_path / "mdl").symlink_to("missing-command")
+    else:
+        (tmp_path / "mdl").write_text("existing command")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "install_single.py"),
+            "--skip-deps",
+            "--bin-dir",
+            str(tmp_path),
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     assert result.returncode != 0
     assert "Refusing to overwrite" in result.stderr
-    assert (tmp_path / "mdl").read_text() == "existing command"
+    if broken_symlink:
+        assert os.readlink(tmp_path / "mdl") == "missing-command"
+    else:
+        assert (tmp_path / "mdl").read_text() == "existing command"
