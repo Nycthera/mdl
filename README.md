@@ -5,7 +5,7 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version 3.5.0](https://img.shields.io/badge/version-3.5.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
+[![Latest release](https://img.shields.io/github/v/release/Nycthera/mdl)](https://github.com/Nycthera/mdl/releases)
 
 ## 📚 Table of Contents
 
@@ -59,6 +59,18 @@
 - **pip/npm** (included with Python/Node.js)
 
 ### Installation
+
+To install a single-file `mdl` command on macOS/Linux:
+
+```bash
+python3 install_single.py
+mdl --help
+```
+
+This bundles all application Python files into `~/.local/bin/mdl.py` and installs
+dependencies in a separate virtual environment. Add `~/.local/bin` to PATH if
+needed. Use `--build-only` to generate `dist/mdl.py`, or `--bin-dir` to choose the
+installation directory. See the [single-file installation guide](INSTALLATION.md#single-file-python-command-macoslinux).
 
 #### Option 1: Automated Setup (Recommended)
 
@@ -263,6 +275,39 @@ See [requirements.txt](requirements.txt) for exact versions:
 
 ## 🧪 Testing
 
+### Publishing a release
+
+Set `__version__` in [src/__init__.py](src/__init__.py), commit the change, and push
+the matching `v` tag. For example, after setting the version to `3.5.1`:
+
+```bash
+python3 scripts/release.py --check-only --tag v3.5.1
+git tag -a v3.5.1 -m "MDL v3.5.1"
+git push origin v3.5.1
+```
+
+The tagged commit must include the workflow, `install_single.py`, and
+`scripts/release.py`. GitHub Actions rejects mismatched tags, runs tests, builds
+and verifies the single-file program, then publishes `mdl.py`, `requirements.txt`,
+`LICENSE`, `INSTALL.txt`, and `SHA256SUMS` to that tag's release. These source assets
+replace the previous PyInstaller platform binaries. Python 3.13+ and dependencies
+are still required; follow `INSTALL.txt` from the release.
+
+Versions use `X.Y.Z`, optionally followed by a prerelease suffix such as
+`3.6.0-rc.1`. The corresponding `v3.6.0-rc.1` release is marked as a prerelease.
+PRs, pushes to `main`, and manual workflow runs test and build without publishing.
+Existing published releases are not overwritten; publish a new version instead.
+
+To reproduce the release build locally after installing dependencies:
+
+```bash
+python3 scripts/release.py  # creates dist/release/
+```
+
+Release behavior follows the [GitHub CLI release documentation](https://cli.github.com/manual/gh_release_create).
+
+### Running tests
+
 ```bash
 # Run all tests
 pytest -v
@@ -403,4 +448,4 @@ See [LICENSE](LICENSE) for full text.
 
 **Made with ❤️ by [Nycthera](https://github.com/Nycthera)**
 
-**Latest Version**: 3.5.0 | **Updated**: March 2026 | **Python 3.13+**
+**Latest Version**: [GitHub Releases](https://github.com/Nycthera/mdl/releases/latest) | **Python 3.13+**
