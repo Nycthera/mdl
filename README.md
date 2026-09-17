@@ -5,7 +5,7 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://python.org)
 [![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version 3.5.0](https://img.shields.io/badge/version-3.5.0-brightgreen.svg)](https://github.com/Nycthera/mdl/releases)
+[![Latest release](https://img.shields.io/github/v/release/Nycthera/mdl)](https://github.com/Nycthera/mdl/releases)
 
 ## 📚 Table of Contents
 
@@ -55,33 +55,39 @@
 ### Prerequisites
 
 - **Python 3.13+**
+- **[uv](https://docs.astral.sh/uv/getting-started/installation/)**
 - **Node.js 18+** (optional, for API server only)
-- **pip/npm** (included with Python/Node.js)
+- **npm** (optional, included with Node.js)
 
 ### Installation
 
-#### Option 1: Automated Setup (Recommended)
+Clone and synchronize the locked environment:
 
 ```bash
-# Clone repository
 git clone https://github.com/Nycthera/mdl.git
 cd mdl
-
-# Install minimal Python dependencies required for the updater
-python -m pip install --upgrade pip
-python -m pip install rich
-
-# Run automated setup
-python main.py --update
+uv sync --locked
+uv run playwright install chromium
+uv run python main.py --help
 ```
 
-The updater shows a selection screen so you can choose Python mode (user/venv) and optional components.
+uv creates and manages `.venv` from `pyproject.toml` and `uv.lock`. Chromium is
+only needed for browser-based sources.
+
+To install a standalone `mdl` command on macOS/Linux:
+
+```bash
+uv run python install_single.py --playwright
+mdl --help
+```
+
+See the [installation guide](INSTALLATION.md) for build-only and custom-location options.
 
 ### Web Dashboard
 
 The repository also includes a Django web app in [mdl-website/README.md](mdl-website/README.md) with login, signup, a protected dashboard, and JSON endpoints backed by Django's built-in auth database.
 
-#### Option 2: Manual Setup
+#### Convenience setup scripts
 
 ```bash
 # macOS/Linux
@@ -92,25 +98,14 @@ chmod +x install.sh
 install.bat
 ```
 
-#### Option 3: Manual Installation
-
-```bash
-# Install dependencies in user site-packages (no venv)
-python -m pip install --upgrade pip
-python -m pip install --user -r requirements.txt
-
-# Install Playwright browsers
-python -m playwright install
-```
-
 ### First Download
 
 ```bash
 # Basic usage
-python main.py -M "one-piece"
+uv run python main.py -M "one-piece"
 
 # Or from MangaDex
-python main.py -M "https://mangadex.org/title/uuid"
+uv run python main.py -M "https://mangadex.org/title/uuid"
 ```
 
 ## 📖 Usage
@@ -118,7 +113,7 @@ python main.py -M "https://mangadex.org/title/uuid"
 ### Command-Line Options
 
 ```bash
-python main.py --help
+uv run python main.py --help
 ```
 
 ### Examples
@@ -126,54 +121,60 @@ python main.py --help
 #### Basic Download (Direct Source)
 
 ```bash
-python main.py -M "one-piece"
+uv run python main.py -M "one-piece"
 ```
 
 #### MangaDex URL Download
 
 ```bash
-python main.py -M "https://mangadex.org/title/uuid"
+uv run python main.py -M "https://mangadex.org/title/uuid"
 ```
 
 #### Advanced Options
 
 ```bash
 # Download with 20 concurrent workers and max 150 pages per chapter
-python main.py -M "naruto" --workers 20 --max-pages 150
+uv run python main.py -M "naruto" --workers 20 --max-pages 150
 
 # Download with CBZ archive creation
-python main.py -M "attack-on-titan" --cbz
+uv run python main.py -M "attack-on-titan" --cbz
 
 # Download specific chapter range
-python main.py -M "demon-slayer" --start-chapter 50 --start-page 1
+uv run python main.py -M "demon-slayer" --start-chapter 50 --start-page 1
 
 # Clean output mode (no progress bars, summary only)
-python main.py -M "jujutsu-kaisen" --clean-output
+uv run python main.py -M "jujutsu-kaisen" --clean-output
 
 # Enable developer debug logs
-python main.py -M "jujutsu-kaisen" --dev
+uv run python main.py -M "jujutsu-kaisen" --dev
 
 # MangaDex with specific language
-python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
+uv run python main.py -M "https://mangadex.org/title/uuid" --md-lang ja
 ```
 
 #### Maintenance Commands
 
 ```bash
-# Update all dependencies
-python main.py --update
+# Remove Python, pytest, and Ruff cache directories from the project
+uv run python scripts/clean_pycache.py
+
+# Preview matching cache directories without deleting them
+uv run python scripts/clean_pycache.py --dry-run
+
+# Synchronize the locked environment
+uv sync --locked
 
 # Check all manga tracked in SQLite and download new chapters
-python main.py --auto-update-db
+uv run python main.py --auto-update-db
 
 # DB auto-update with developer debug logs
-python main.py --auto-update-db --dev
+uv run python main.py --auto-update-db --dev
 
 # Show credits and attribution
-python main.py --credits
+uv run python main.py --credits
 
 # Display version
-python main.py --version
+uv run python main.py --version
 ```
 
 ## 🤖 DB Auto-Update
@@ -181,7 +182,7 @@ python main.py --version
 Use the database as your tracking source to fetch updates for previously downloaded manga:
 
 ```bash
-python main.py --auto-update-db
+uv run python main.py --auto-update-db
 ```
 
 Detailed guide: [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md)
@@ -209,7 +210,7 @@ Example config:
 You can edit this file directly to set defaults, then run without `-M` flag:
 
 ```bash
-python main.py  # Uses values from config.json
+uv run python main.py  # Uses values from config.json
 ```
 
 ## Architecture
@@ -253,25 +254,58 @@ src/
 
 ## 📦 Dependencies
 
-See [requirements.txt](requirements.txt) for exact versions:
+Runtime dependencies are declared in `pyproject.toml` and resolved exactly in
+`uv.lock`:
 
 - **aiohttp** (3.8+) - Async HTTP client
 - **rich** (13.5+) - Terminal UI & formatting
 - **playwright** (1.40+) - Browser automation
-- **requests** (2.31+) - HTTP library
-- **pytest** (7.4+) - Testing framework
+- **pytest** - Testing framework (development group)
 
 ## 🧪 Testing
 
+### Publishing a release
+
+Set `__version__` in [src/__init__.py](src/__init__.py), commit the change, and push
+the matching `v` tag. For example, after setting the version to `3.5.1`:
+
+```bash
+uv run python scripts/release.py --check-only --tag v3.5.1
+git tag -a v3.5.1 -m "MDL v3.5.1"
+git push origin v3.5.1
+```
+
+The tagged commit must include the workflow, `install_single.py`, and
+`scripts/release.py`. GitHub Actions rejects mismatched tags, runs tests, builds
+and verifies the single-file program, then publishes `mdl.py`, `pyproject.toml`,
+`uv.lock`, `LICENSE`, `INSTALL.txt`, and `SHA256SUMS` to that tag's release. These source assets
+replace the previous PyInstaller platform binaries. Python 3.13+ and dependencies
+are still required; follow `INSTALL.txt` from the release.
+
+Versions use `X.Y.Z`, optionally followed by a prerelease suffix such as
+`3.6.0-rc.1`. The corresponding `v3.6.0-rc.1` release is marked as a prerelease.
+PRs, pushes to `main`, and manual workflow runs test and build without publishing.
+Existing published releases are not overwritten; publish a new version instead.
+
+To reproduce the release build locally after installing dependencies:
+
+```bash
+uv run python scripts/release.py  # creates dist/release/
+```
+
+Release behavior follows the [GitHub CLI release documentation](https://cli.github.com/manual/gh_release_create).
+
+### Running tests
+
 ```bash
 # Run all tests
-pytest -v
+uv run python -m pytest -v
 
 # Run with coverage
-pytest --cov=src
+uv run python -m pytest --cov=src
 
 # Run specific test file
-pytest test/test_main.py -v
+uv run python -m pytest test/test_main.py -v
 ```
 
 ## 🐛 Troubleshooting
@@ -299,7 +333,7 @@ chmod +x install.sh
 
 ```bash
 # Reinstall Playwright
-python -m playwright install
+uv run playwright install chromium
 ```
 
 ### "Rate limited by MangaDex"
@@ -307,7 +341,7 @@ python -m playwright install
 Reduce workers and add delays:
 
 ```bash
-python main.py -M "manga" --workers 3
+uv run python main.py -M "manga" --workers 3
 ```
 
 ### Cannot create CBZ
@@ -344,7 +378,7 @@ We welcome contributions! Here's how:
 1. **Fork** the repository
 2. **Create** a feature branch (`git checkout -b feature/awesome-feature`)
 3. **Commit** changes (`git commit -am 'Add awesome feature'`)
-4. **Test** thoroughly (`pytest -v`)
+4. **Test** thoroughly (`uv run python -m pytest -v`)
 5. **Push** to branch (`git push origin feature/awesome-feature`)
 6. **Open** a Pull Request
 
@@ -355,14 +389,14 @@ We welcome contributions! Here's how:
 git clone https://github.com/YOUR_USERNAME/mdl.git
 cd mdl
 
-# Install dev dependencies
-pip install -r requirements.txt
+# Install locked runtime and development dependencies
+uv sync --locked
 
 # Create feature branch
 git checkout -b feature/your-feature
 
 # Make changes & test
-pytest -v
+uv run python -m pytest -v
 
 # Push and create PR
 ```
@@ -403,4 +437,4 @@ See [LICENSE](LICENSE) for full text.
 
 **Made with ❤️ by [Nycthera](https://github.com/Nycthera)**
 
-**Latest Version**: 3.5.0 | **Updated**: March 2026 | **Python 3.13+**
+**Latest Version**: [GitHub Releases](https://github.com/Nycthera/mdl/releases/latest) | **Python 3.13+**

@@ -17,59 +17,45 @@ Defaults:
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
-
 
 # ---------------------------------------------------------------------------
 # Source files in topological dependency order.
 #
 # A file must appear BEFORE any file that imports from it. External deps
 # (aiohttp, rich, playwright, etc.) are NOT bundled — they're expected to be
-# installed via `pip install -r requirements.txt`.
+# installed from the project's locked uv environment.
 # ---------------------------------------------------------------------------
 SOURCE_FILES: list[str] = [
     # Foundation — no internal deps
-    "src/__init__.py",            # __version__, __author__, __license__
-    "src/utils.py",               # Colors, cprint, sanitize_folder_name, ...
-
+    "src/__init__.py",  # __version__, __author__, __license__
+    "src/utils.py",  # Colors, cprint, sanitize_folder_name, ...
     # Depends on utils
-    "src/config.py",              # load_config, save_config, get_config_path
-    "src/rate_limiter.py",        # RateLimiter, rate_limiter, rate_limiter_athome
-
+    "src/config.py",  # load_config, save_config, get_config_path
+    "src/rate_limiter.py",  # RateLimiter, rate_limiter, rate_limiter_athome
     # Depends on utils (standalone HTTP infra)
-    "src/http.py",                # build_session, classify_failure, HostConcurrencyCap, ...
-
+    "src/http.py",  # build_session, classify_failure, HostConcurrencyCap, ...
     # Depends on config
-    "src/database/manga_db.py",   # record_download, record_download_from_folders, ...
-
+    "src/database/manga_db.py",  # record_download, record_download_from_folders, ...
     # Depends on utils
-    "src/cbz.py",                 # create_cbz_for_all, set_clean_output
-
+    "src/cbz.py",  # create_cbz_for_all, set_clean_output
     # Depends on database.manga_db, http, utils
-    "src/downloader.py",          # download_image, download_all_pages, url_exists
-
+    "src/downloader.py",  # download_image, download_all_pages, url_exists
     # Depends on downloader
-    "src/scrapers/__init__.py",   # _collect_existing_urls, _build_chapter_urls, ...
-
+    "src/scrapers/__init__.py",  # _collect_existing_urls, _build_chapter_urls, ...
     # Depends on scrapers, utils, downloader
-    "src/scrapers/generic.py",    # gather_all_urls, BASE_URLS
-
+    "src/scrapers/generic.py",  # gather_all_urls, BASE_URLS
     # Depends on downloader, cbz, database, http, rate_limiter, utils
-    "src/scrapers/mangadex.py",   # download_md_chapters, fetch_all_chapters_md, ...
-
+    "src/scrapers/mangadex.py",  # download_md_chapters, fetch_all_chapters_md, ...
     # No internal deps (uses Playwright + rich)
     "src/scrapers/weebcentral.py",
     "src/scrapers/webtoons.py",
-
     # Depends on rich (fallback to plain)
-    "src/system_utils.py",        # update, credits
-
+    "src/system_utils.py",  # update, credits
     # Depends on cli (which depends on src.__init__)
-    "src/cli.py",                 # parse_args
-
+    "src/cli.py",  # parse_args
     # Main entry point — depends on everything
     "main.py",
 ]
@@ -146,7 +132,7 @@ def extract_main_block(source: str) -> tuple[str, str]:
     if not m:
         return source, ""
     body = source[: m.start()] + "\n"
-    main_block = source[m.start():]
+    main_block = source[m.start() :]
     return body, main_block
 
 
@@ -157,7 +143,7 @@ def read_source_file(path: Path) -> str:
     # We keep `# -*- coding ... -*-` and shebangs if present (none in this codebase).
     m = re.match(r'^\s*"""[^"]*"""\s*\n', text)
     if m:
-        text = text[m.end():]
+        text = text[m.end() :]
     return text
 
 
@@ -174,7 +160,7 @@ def bundle(source_dir: Path, output: Path) -> None:
         "All source modules have been concatenated in topological order;\n"
         "internal `from src.* import ...` lines have been stripped because\n"
         "every top-level name is now in the same module namespace.\n\n"
-        "External dependencies (install via requirements.txt):\n"
+        "External dependencies (install with `uv sync --locked`):\n"
         "    aiohttp, rich, playwright, playwright-stealth\n"
         '"""\n\n'
     )

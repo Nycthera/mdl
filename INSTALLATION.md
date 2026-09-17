@@ -1,157 +1,108 @@
-# Installation & Setup Guide
+# Installation and Setup
 
-Version: 3.5.0
-Updated: March 2026
+MDL requires [uv](https://docs.astral.sh/uv/getting-started/installation/) and
+Python 3.13 or newer. uv installs the correct dependencies into a project-local
+`.venv` from the committed lockfile, without modifying your system Python.
 
-Installers now open a selection screen so you can choose what to install:
-
-- Python dependency mode: user site-packages or project venv
-- Playwright browsers
-- Manga-API/Node dependencies
-- CLI wrapper
-
-## System Requirements
-
-- Python 3.13+
-- pip (bundled with Python)
-- Node.js 18+ (optional, only for Manga-API)
-
-## Recommended Install (One Command)
+## Source checkout
 
 ```bash
 git clone https://github.com/Nycthera/mdl.git
 cd mdl
-python main.py --update
+uv sync --locked
+uv run playwright install chromium
+uv run python main.py --help
 ```
 
-What this does:
+The browser install is only required for browser-based sources. MangaDex and
+direct image sources can run without it.
 
-- Shows a selection screen for components and Python mode
-- Verifies Python is available
-- Installs selected dependencies and tools
-
-## Script Installers
-
-### macOS/Linux
+The convenience installers perform the same environment setup and optionally
+install Chromium:
 
 ```bash
-chmod +x install.sh
+# macOS/Linux
 ./install.sh
-```
 
-The script prompts you to choose install mode and optional components.
-
-The script creates a CLI wrapper at:
-
-```text
-~/.local/bin/mdl
-```
-
-If needed, add this to PATH:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-```
-
-### Windows
-
-```bat
+# Windows
 install.bat
-```
-
-The script prompts you to choose install mode and optional components.
-
-The script creates a CLI wrapper at:
-
-```text
-%USERPROFILE%\bin\mdl.cmd
-```
-
-Add `%USERPROFILE%\bin` to your PATH, then open a new terminal.
-
-## Manual Install (No venv)
-
-### 1. Install Python dependencies
-
-```bash
-python -m pip install --upgrade pip
-python -m pip install --user -r requirements.txt
-```
-
-### 2. Install Playwright browsers
-
-```bash
-python -m playwright install
-```
-
-### 3. Optional: install API server dependencies
-
-```bash
-cd server
-npm install
-cd ..
 ```
 
 ## Running MDL
 
 ```bash
-python main.py --help
-python main.py -M "one-piece"
+uv run python main.py -M "one-piece"
+uv run python main.py -M "https://mangadex.org/title/uuid"
+uv run python main.py --help
 ```
 
-If your CLI wrapper is on PATH:
+After pulling changes, synchronize the environment again:
 
 ```bash
-mdl --help
-mdl -M "one-piece"
+uv sync --locked
 ```
 
-## Verification
+You can also run `uv run python main.py --update` from an already synchronized
+checkout.
+
+## Standalone command on macOS/Linux
+
+The standalone installer embeds the application source in one file and uses uv
+to create an isolated runtime environment:
 
 ```bash
-python --version
-python -c "import aiohttp, rich, playwright; print('ok')"
-python main.py --version
+uv run python install_single.py
 ```
+
+This installs `mdl.py` and an `mdl` symlink under `~/.local/bin` by default.
+Use `--playwright` to install Chromium, `--bin-dir` or `--venv-dir` to choose
+other locations, and `--build-only` to create `dist/mdl.py` without installing.
+
+```bash
+uv run python install_single.py --playwright
+uv run python install_single.py --build-only
+```
+
+The installed bundle's `--update` command prints rebuild instructions. Pull the
+source and rerun `install_single.py` to update a standalone installation.
+
+## Development
+
+The default sync includes the `dev` dependency group:
+
+```bash
+uv sync --locked
+uv run python -m pytest
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Runtime-only environments can omit development tools:
+
+```bash
+uv sync --locked --no-dev
+```
+
+Add or remove dependencies with `uv add`, `uv add --dev`, and `uv remove`, then
+commit both `pyproject.toml` and `uv.lock`.
 
 ## Troubleshooting
 
-### Python command not found
-
-- Windows: install Python from python.org and enable Add to PATH
-- macOS: install with Homebrew (`brew install python3`)
-- Linux: install with your package manager (`python3`, `python3-pip`)
-
-### Dependency install permission errors
-
-Use user-scoped install:
+Check the managed interpreter and dependency state with:
 
 ```bash
-python -m pip install --user -r requirements.txt
+uv run python --version
+uv sync --locked --check
 ```
 
-If your distro blocks user-site installs, use your package manager Python and pip setup.
-
-### Playwright browser install fails
+If Chromium is missing or outdated, reinstall it with:
 
 ```bash
-python -m playwright install
+uv run playwright install chromium
 ```
 
-Linux only (if required):
+On Linux, Playwright may also require system packages:
 
 ```bash
-python -m playwright install-deps
+uv run playwright install-deps chromium
 ```
-
-### CLI command not found after install
-
-- macOS/Linux: ensure `~/.local/bin` is in PATH
-- Windows: ensure `%USERPROFILE%\bin` is in PATH
-- Restart terminal after PATH changes
-
-## Notes
-
-- User mode: no activation step is needed.
-- Venv mode: activate with `source venv/bin/activate` (Unix) or `call venv\Scripts\activate` (Windows).
-- Re-run `python main.py --update` any time you pull new changes.

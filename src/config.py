@@ -2,9 +2,9 @@
 
 import json
 import os
-from typing import Any, Dict
+from typing import Any
 
-from src.utils import cprint, Colors
+from src.utils import Colors, cprint
 
 
 def get_config_path() -> str:
@@ -35,12 +35,12 @@ def create_default_config() -> None:
     cprint(f"Default config created: {CONFIG_FILE}", Colors.GREEN)
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """Load configuration from file, creating defaults if needed."""
     if not os.path.exists(CONFIG_FILE):
         create_default_config()
-    
-    with open(CONFIG_FILE, "r") as f:
+
+    with open(CONFIG_FILE) as f:
         config = json.load(f)
 
     # Add missing keys with defaults
@@ -56,7 +56,7 @@ def load_config() -> Dict[str, Any]:
     return config
 
 
-def save_config(config: Dict[str, Any]) -> None:
+def save_config(config: dict[str, Any]) -> None:
     """Save configuration to file."""
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)

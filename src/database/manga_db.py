@@ -7,7 +7,7 @@ import re
 import shutil
 import sqlite3
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 from rich.console import Console
 
@@ -26,9 +26,7 @@ DEFAULT_DB_PATH = _resolve_db_path(
         os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
     )
 )
-LEGACY_DB_PATH = _resolve_db_path(
-    os.path.join(os.path.dirname(__file__), "manga_collection.db")
-)
+LEGACY_DB_PATH = _resolve_db_path(os.path.join(os.path.dirname(__file__), "manga_collection.db"))
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS manga_data (
@@ -280,9 +278,7 @@ def record_download_from_folders(
     latest_local = infer_latest_chapter_from_folders(chapter_folders)
     _db_log(f"Inferred latest local chapter={latest_local}")
     latest_source = (
-        latest_local
-        if latest_chapter_from_mangadex is None
-        else latest_chapter_from_mangadex
+        latest_local if latest_chapter_from_mangadex is None else latest_chapter_from_mangadex
     )
     record_download(
         manga_name=manga_name,

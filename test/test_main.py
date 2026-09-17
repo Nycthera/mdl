@@ -6,27 +6,25 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
-import pytest
 import aiohttp
+import pytest
 
-
+import main as app_main
 import src.config as config_mod
+import src.database.manga_db as manga_db_mod
+import src.scrapers.generic as generic_mod
+import src.scrapers.mangadex as mangadex_mod
 import src.utils as utils_mod
 from src.cbz import create_cbz_for_all
 from src.database.manga_db import (
     ensure_schema,
+    get_tracked_manga,
     has_new_mangadex_release,
     infer_latest_chapter_from_folders,
-    get_tracked_manga,
     record_download,
     record_download_from_folders,
 )
-import main as app_main
-import src.scrapers.mangadex as mangadex_mod
-import src.database.manga_db as manga_db_mod
-import src.scrapers.generic as generic_mod
-from src.downloader import download_image, _get_trackable_chapter_folders
-
+from src.downloader import _get_trackable_chapter_folders, download_image
 
 # ---------- CONFIG TESTS ----------
 
@@ -400,7 +398,9 @@ async def test_gather_all_urls_probes_decimal_chapters_after_integer(monkeypatch
         session,
         base_urls,
     ):
-        return [f"https://example/{chapter_label}-001.png"], f"{folder_base}/chapter_{chapter_label}"
+        return [
+            f"https://example/{chapter_label}-001.png"
+        ], f"{folder_base}/chapter_{chapter_label}"
 
     monkeypatch.setattr(generic_mod.aiohttp, "ClientSession", DummyClientSession)
     monkeypatch.setattr(generic_mod, "url_exists", fake_url_exists)

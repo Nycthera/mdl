@@ -18,7 +18,6 @@
 - **aiohttp** - Async HTTP client with connection pooling
 - **playwright + playwright-stealth** - Browser automation for web scraping
 - **rich** - Terminal UI with progress bars and formatted output
-- **requests** - Synchronous HTTP for simple operations
 
 ### Development & Testing
 
@@ -87,8 +86,8 @@ mdl/
 │       ├── Download logic mocking
 │       └── Edge case handling
 │
-├── requirements.txt        # Python dependencies
-├── pytest.ini             # pytest configuration
+├── pyproject.toml         # Dependencies and tool configuration
+├── uv.lock                # Reproducible dependency lockfile
 ├── install.sh/install.bat # Installation scripts
 │
 ├── .github/workflows/
@@ -131,9 +130,13 @@ progress = Progress(
 ```python
 # Graceful shutdown on interrupts
 stop_signal = False
+
+
 def signal_handler(sig, frame):
     global stop_signal
     stop_signal = True
+
+
 signal.signal(signal.SIGINT, signal_handler)
 ```
 
@@ -163,16 +166,16 @@ def load_config():
 
 ```bash
 # Basic download
-python main.py -M "one-piece"
+uv run python main.py -M "one-piece"
 
 # MangaDx URL
-python main.py -M "https://mangadx.org/title/uuid/manga-name"
+uv run python main.py -M "https://mangadx.org/title/uuid/manga-name"
 
 # Advanced with options
-python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
+uv run python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
 
 # Clean output mode (minimal UI)
-python main.py -M "naruto" --clean-output
+uv run python main.py -M "naruto" --clean-output
 ```
 
 ## Testing Strategy
@@ -234,7 +237,7 @@ Default config structure:
 
 ## Development Workflow
 
-1. **Local Testing** - `pytest -v` runs comprehensive test suite
+1. **Local Testing** - `uv run python -m pytest -v` runs the comprehensive test suite
 2. **CI/CD** - GitHub Actions on push/PR
 3. **Releases** - Manual workflow dispatch for version releases
 4. **Updates** - Self-update mechanism via `--update` flag
@@ -250,7 +253,6 @@ The README references a Node.js API server (`Manga-API/`) with 5 RESTful endpoin
 - `aiohttp` - Async HTTP client
 - `playwright` - Browser automation
 - `playwright-stealth` - Anti-detection for scraping
-- `requests` - Synchronous HTTP
 - `rich` - Terminal UI
 
 ### Development

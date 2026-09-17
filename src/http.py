@@ -27,8 +27,8 @@ import asyncio
 import os
 import random
 import threading
-from collections import defaultdict
-from typing import Optional, Tuple, Callable, Awaitable, Any
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
 
 import aiohttp
@@ -39,10 +39,10 @@ import aiohttp
 
 # Conservative defaults — host-aware callers can pass overrides.
 DEFAULT_CONNECTOR_KWARGS = dict(
-    limit=64,                 # total in-flight connections across all hosts
-    limit_per_host=32,        # per-host ceiling (will be further capped by AIMD)
-    ttl=30,                   # idle connection TTL in seconds (keepalive)
-    force_close=False,        # keep connections alive (HTTP keep-alive)
+    limit=64,  # total in-flight connections across all hosts
+    limit_per_host=32,  # per-host ceiling (will be further capped by AIMD)
+    ttl=30,  # idle connection TTL in seconds (keepalive)
+    force_close=False,  # keep connections alive (HTTP keep-alive)
     enable_cleanup_closed=True,  # close SSL sockets cleanly (avoid ResourceWarning)
 )
 
@@ -82,9 +82,9 @@ def set_default_timeout(total_seconds: float) -> None:
 
 def build_session(
     *,
-    connector_kwargs: Optional[dict] = None,
-    timeout: Optional[aiohttp.ClientTimeout] = None,
-    headers: Optional[dict] = None,
+    connector_kwargs: dict | None = None,
+    timeout: aiohttp.ClientTimeout | None = None,
+    headers: dict | None = None,
 ) -> aiohttp.ClientSession:
     """Construct an aiohttp.ClientSession with a tuned TCPConnector.
 
@@ -125,8 +125,8 @@ _CF_BODY_KEYWORDS = (
 
 
 def classify_failure(
-    status: Optional[int],
-    exc: Optional[BaseException] = None,
+    status: int | None,
+    exc: BaseException | None = None,
     body_snippet: bytes = b"",
 ) -> str:
     """Classify an HTTP failure into one of four buckets.
@@ -142,7 +142,9 @@ def classify_failure(
         if exc is not None:
             if isinstance(exc, asyncio.TimeoutError):
                 return "retryable"
-            if isinstance(exc, (aiohttp.ClientConnectorDNSError, aiohttp.ClientProxyConnectionError)):
+            if isinstance(
+                exc, (aiohttp.ClientConnectorDNSError, aiohttp.ClientProxyConnectionError)
+            ):
                 return "permanent"
             if isinstance(exc, aiohttp.ClientError):
                 return "retryable"
@@ -174,6 +176,7 @@ def classify_failure(
 # 3. Backoff computation (bounded exponential + jitter, per class)
 # ---------------------------------------------------------------------------
 
+
 def compute_backoff(cls: str, attempt: int, base: float = 1.0) -> float:
     """Return sleep seconds for a given failure class and attempt number (1-indexed).
 
@@ -196,6 +199,7 @@ def compute_backoff(cls: str, attempt: int, base: float = 1.0) -> float:
 # ---------------------------------------------------------------------------
 # 4. Per-host AIMD concurrency cap
 # ---------------------------------------------------------------------------
+
 
 class HostConcurrencyCap:
     """Per-host Additive-Increase / Multiplicative-Decrease concurrency cap.
@@ -230,7 +234,7 @@ class HostConcurrencyCap:
         except Exception:
             return "unknown"
 
-    def effective(self, url: str, base: Optional[int] = None) -> int:
+    def effective(self, url: str, base: int | None = None) -> int:
         """Return min(base, cap[host]) if host is capped; else base."""
         host = self.host_of(url)
         b = self._baseline if base is None else max(1, int(base))
@@ -311,12 +315,12 @@ async def download_image_streaming(
     *,
     max_retries: int = 5,
     backoff_base: float = 1.0,
-    timeout: Optional[aiohttp.ClientTimeout] = None,
-    sem: Optional[asyncio.Semaphore] = None,
-    referer: Optional[str] = None,
-    stop_check: Optional[Callable[[], bool]] = None,
-    on_failure_class: Optional[Callable[[str, str], None]] = None,
-) -> Tuple[bool, str]:
+    timeout: aiohttp.ClientTimeout | None = None,
+    sem: asyncio.Semaphore | None = None,
+    referer: str | None = None,
+    stop_check: Callable[[], bool] | None = None,
+    on_failure_class: Callable[[str, str], None] | None = None,
+) -> tuple[bool, str]:
     """Download a single image with classified retry + streaming + async write.
 
     Returns (success, message).
@@ -402,7 +406,7 @@ async def download_image_streaming(
                 _host_cap.record_success(url)
                 return True, f"saved:{filepath}"
 
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             last_cls = "retryable"
             _host_cap.record_failure(url, "retryable")
             if on_failure_class:
@@ -432,18 +436,19 @@ async def download_image_streaming(
 # 6. Generic classified retry helper for non-image GETs (API calls etc.)
 # ---------------------------------------------------------------------------
 
+
 async def make_request(
     session: aiohttp.ClientSession,
     url: str,
     *,
     method: str = "GET",
-    params: Optional[dict] = None,
-    headers: Optional[dict] = None,
+    params: dict | None = None,
+    headers: dict | None = None,
     max_retries: int = 5,
     backoff_base: float = 1.0,
-    timeout: Optional[aiohttp.ClientTimeout] = None,
+    timeout: aiohttp.ClientTimeout | None = None,
     expect_json: bool = True,
-) -> Tuple[Optional[Any], Optional[int]]:
+) -> tuple[Any | None, int | None]:
     """Make an HTTP request with classified retry. Returns (data, status).
 
     If `expect_json` is True and the response is OK, returns parsed JSON.
@@ -451,7 +456,7 @@ async def make_request(
 
     On terminal failure, returns (None, last_status_seen).
     """
-    last_status: Optional[int] = None
+    last_status: int | None = None
     for attempt in range(1, max_retries + 1):
         try:
             async with session.request(
@@ -474,7 +479,7 @@ async def make_request(
                 if expect_json:
                     return await r.json(), r.status
                 return await r.read(), r.status
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _host_cap.record_failure(url, "retryable")
             if attempt == max_retries:
                 return None, last_status

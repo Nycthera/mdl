@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-from typing import List, Tuple
 
 import aiohttp
 from rich.console import Console
@@ -29,18 +28,18 @@ def set_clean_output(value: bool) -> None:
 
 
 async def _collect_existing_urls(
-    urls: List[str],
+    urls: list[str],
     label: str,
     workers: int,
     session: aiohttp.ClientSession,
-) -> List[str]:
+) -> list[str]:
     """Check which URLs exist and return the valid ones."""
     if not urls:
         return []
 
     sem = asyncio.Semaphore(max(1, workers))
 
-    async def check_one(u: str) -> Tuple[str, bool]:
+    async def check_one(u: str) -> tuple[str, bool]:
         async with sem:
             return u, await url_exists(session, u)
 
@@ -73,8 +72,8 @@ async def _collect_existing_urls(
 
 
 def _build_chapter_urls(
-    manga_name: str, chapter_str: str, start_page: int, max_pages: int, base_urls: List[str]
-) -> List[str]:
+    manga_name: str, chapter_str: str, start_page: int, max_pages: int, base_urls: list[str]
+) -> list[str]:
     """Build list of chapter page URLs."""
     return [
         f"{base}{manga_name}/{chapter_str}-{page:03d}.png"
@@ -91,8 +90,8 @@ async def _collect_chapter_urls_for_download(
     folder_base: str,
     workers: int,
     session: aiohttp.ClientSession,
-    base_urls: List[str],
-) -> Tuple[List[str], str]:
+    base_urls: list[str],
+) -> tuple[list[str], str]:
     """Collect URLs for a single chapter."""
     chapter_folder = os.path.join(folder_base, f"chapter_{chapter_label}")
     os.makedirs(chapter_folder, exist_ok=True)

@@ -2,6 +2,7 @@
 
 import os
 import zipfile
+
 from rich.console import Console
 
 from src.utils import sanitize_folder_name
@@ -25,9 +26,7 @@ def create_cbz_for_all(folder_path: str) -> str | None:
     # Defensive checks: folder must exist and have files to archive
     if not os.path.isdir(base_folder):
         if not CLEAN_OUTPUT:
-            console.print(
-                f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]"
-            )
+            console.print(f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]")
         return None
 
     # Ensure there's at least one file (excluding existing .cbz) to archive
@@ -42,9 +41,7 @@ def create_cbz_for_all(folder_path: str) -> str | None:
 
     if not has_files:
         if not CLEAN_OUTPUT:
-            console.print(
-                f"[red]No files found in {base_folder}; skipping CBZ creation.[/]"
-            )
+            console.print(f"[red]No files found in {base_folder}; skipping CBZ creation.[/]")
         return None
 
     base_name = os.path.basename(base_folder)
@@ -78,6 +75,7 @@ def create_cbz_for_all(folder_path: str) -> str | None:
         if os.path.isdir(item_path):
             try:
                 import shutil
+
                 shutil.rmtree(item_path)
                 if not CLEAN_OUTPUT:
                     console.print(f"[green]Deleted folder {item_path}[/]")
