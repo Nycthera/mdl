@@ -4,15 +4,17 @@
 mdl/
 ├── main.py                 # Core Python CLI application
 ├── test.py                 # API integration testing
-├── requirements.txt        # Python dependencies
+├── pyproject.toml          # Project metadata, dependencies, and tool configuration
+├── uv.lock                 # Reproducible dependency lockfile
 ├── README.md              # Project documentation
 ├── ARCHITECTURE.md        # Technical architecture docs
 ├── .github/
 │   └── workflows/
 │       └── python-tests.yml # CI/CD pipeline
+├── scripts/
+│   └── clean_pycache.py     # Removes Python, pytest, and Ruff caches
 ├── test/
-│   ├── test_main.py       # Comprehensive unit tests
-│   └── __pycache__/       # Python bytecode cache
+│   └── test_main.py       # Comprehensive unit tests
 ├── Manga-API/             # Node.js API server
 │   ├── package.json       # Node.js dependencies
 │   ├── app/
@@ -21,7 +23,6 @@ mdl/
 │   │   ├── controller.js  # Request handlers
 │   │   └── mangakakalot.js # Web scraping logic
 │   └── index.html         # API documentation page
-└── __pycache__/           # Python bytecode cache
 ```
 
 ## Key Files Explained
@@ -40,4 +41,5 @@ mdl/
 ### DevOps
 
 - **`python-tests.yml`** - GitHub Actions CI/CD with automated testing and optional releases
+- **`clean_pycache.py`** - Cross-platform cleanup utility for `__pycache__`, `.pytest_cache`, and `.ruff_cache`
 - **`.gitignore`** - Professional exclusions for Python, Node.js, and IDE files

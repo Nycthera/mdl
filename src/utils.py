@@ -6,10 +6,11 @@ import re
 import shutil
 import sys
 from urllib.parse import urlparse
-from typing import Optional, Tuple
+
 from rich.console import Console
 
 console = Console()
+
 
 # Legacy color support
 class Colors:
@@ -27,7 +28,7 @@ def cprint(msg: str, color: str = Colors.RESET) -> None:
     print(color + msg + Colors.RESET)
 
 
-def validate_manga_input(manga_name: Optional[str]) -> None:
+def validate_manga_input(manga_name: str | None) -> None:
     """Validate that a manga name or URL is provided."""
     if not manga_name:
         cprint(
@@ -65,7 +66,7 @@ def sanitize_folder_name(name: str) -> str:
     return cleaned
 
 
-def get_slug_and_pretty(manga_input: str) -> Tuple[str, str]:
+def get_slug_and_pretty(manga_input: str) -> tuple[str, str]:
     """Return (slug_for_urls, pretty_folder_name).
 
     - slug_for_urls: hyphen-separated string suitable for building URLs

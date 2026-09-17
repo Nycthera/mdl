@@ -14,7 +14,6 @@ Speed wins ported from AIO-Webtoon-Downloader:
 import asyncio
 import os
 from collections import defaultdict
-from typing import List, Tuple
 
 import aiohttp
 from rich.console import Console
@@ -29,16 +28,14 @@ from rich.progress import (
 
 from src.database.manga_db import record_download_from_folders
 from src.http import (
-    DEFAULT_TIMEOUT,
     HEAD_TIMEOUT,
-    build_session,
     classify_failure,
     compute_backoff,
     download_image_streaming,
     get_default_timeout,
     get_host_cap,
 )
-from src.utils import Colors, _loop_time, _cancel_pending_tasks
+from src.utils import Colors, _cancel_pending_tasks, _loop_time
 
 console = Console()
 
@@ -121,7 +118,6 @@ async def download_image(
             pass
 
     host_cap = get_host_cap()
-    host = host_cap.host_of(url)
     headers = {"Referer": referer} if referer else None
 
     last_error = "unknown"
@@ -129,9 +125,7 @@ async def download_image(
         if stop_signal:
             return f"{Colors.RED}Download interrupted{Colors.RESET}"
         try:
-            async with session.get(
-                url, timeout=get_default_timeout(), headers=headers
-            ) as r:
+            async with session.get(url, timeout=get_default_timeout(), headers=headers) as r:
                 if r.status >= 400:
                     # Best-effort body sniff for Cloudflare classification.
                     body_snippet = b""
@@ -162,9 +156,7 @@ async def download_image(
                             f"{Colors.RED}Failed to download {filename} after "
                             f"{max_retries} attempts: empty response{Colors.RESET}"
                         )
-                    await asyncio.sleep(
-                        compute_backoff("retryable", attempt, backoff_factor)
-                    )
+                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_factor))
                     continue
 
                 # Atomic write: pending tempfile -> os.replace to final path.
@@ -174,7 +166,7 @@ async def download_image(
                 host_cap.record_success(url)
                 return f"{Colors.GREEN}Saved as {filepath}{Colors.RESET}"
 
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             host_cap.record_failure(url, "retryable")
             last_error = f"timeout: {e}"
             if attempt == max_retries:
@@ -228,8 +220,8 @@ def _download_failed(result: str) -> bool:
 
 
 def _get_trackable_chapter_folders(
-    urls_to_download: List[Tuple[str, str]],
-    page_results: dict[Tuple[str, str], str],
+    urls_to_download: list[tuple[str, str]],
+    page_results: dict[tuple[str, str], str],
 ) -> list[str]:
     """Return the fully completed contiguous chapter folders from the queue start."""
     expected_pages: dict[str, int] = defaultdict(int)
@@ -271,7 +263,7 @@ def _build_connector(max_workers: int) -> aiohttp.TCPConnector:
 
 
 async def download_all_pages(
-    urls_to_download: List[Tuple[str, str]],
+    urls_to_download: list[tuple[str, str]],
     max_workers: int = 10,
     manga_name: str = "manga",
     track_to_db: bool = True,
@@ -294,16 +286,14 @@ async def download_all_pages(
     # Tune the AIMD baseline to match the requested worker count so per-host
     # caps scale with the user's --workers setting.
     host_cap = get_host_cap()
-    host_cap._baseline = max(
-        1, max_workers
-    )  # noqa: SLF001 — intentional internal access
+    host_cap._baseline = max(1, max_workers)  # noqa: SLF001 — intentional internal access
 
     connector = _build_connector(max_workers)
     async with aiohttp.ClientSession(connector=connector) as session:
         sem = asyncio.Semaphore(max(1, max_workers))
-        page_results: dict[Tuple[str, str], str] = {}
+        page_results: dict[tuple[str, str], str] = {}
 
-        async def download_worker(args: Tuple[str, str]) -> Tuple[Tuple[str, str], str]:
+        async def download_worker(args: tuple[str, str]) -> tuple[tuple[str, str], str]:
             async with sem:
                 url, folder = args
                 return args, await download_image(
@@ -314,9 +304,7 @@ async def download_all_pages(
                     referer=referer,
                 )
 
-        tasks = [
-            asyncio.create_task(download_worker(item)) for item in urls_to_download
-        ]
+        tasks = [asyncio.create_task(download_worker(item)) for item in urls_to_download]
 
         if not CLEAN_OUTPUT:
             with Progress(
@@ -331,9 +319,7 @@ async def download_all_pages(
                 console=console,
                 transient=True,
             ) as progress:
-                task = progress.add_task(
-                    "Downloading", total=total_pages, pages_per_sec="0.0"
-                )
+                task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
 
                 start_time = _loop_time()
                 completed = 0
@@ -359,9 +345,7 @@ async def download_all_pages(
 
     if track_to_db and not stop_signal and urls_to_download:
         try:
-            chapter_folders = _get_trackable_chapter_folders(
-                urls_to_download, page_results
-            )
+            chapter_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
             if DEV_MODE and not CLEAN_OUTPUT:
                 console.print(
                     f"[bold blue][db][/bold blue] Triggering save from downloader for '{manga_name}'"

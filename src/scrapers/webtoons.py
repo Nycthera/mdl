@@ -20,10 +20,8 @@ This is handled by passing referer=... to download_all_pages().
 """
 
 import asyncio
-import os
 import re
-from typing import List, Tuple
-from urllib.parse import urljoin, urlparse, parse_qs
+from urllib.parse import urljoin, urlparse
 
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
@@ -127,7 +125,7 @@ async def _launch_browser(p):
 async def _fetch_episode_image_urls(
     page,
     viewer_url: str,
-) -> List[str]:
+) -> list[str]:
     """Navigate to a viewer URL and extract all episode image URLs.
 
     Webtoons lazy-loads images, so we scroll the page to force every image
@@ -173,7 +171,7 @@ async def _fetch_episode_image_urls(
     await asyncio.sleep(1.5)
 
     img_elements = await page.query_selector_all("img")
-    img_urls: List[str] = []
+    img_urls: list[str] = []
     for img in img_elements:
         # Try src first; if empty or placeholder, try data-url.
         src = await img.get_attribute("src")
@@ -192,7 +190,7 @@ async def _fetch_episode_image_urls(
 
     # De-duplicate while preserving order (Webtoons sometimes duplicates img tags).
     seen = set()
-    unique_urls: List[str] = []
+    unique_urls: list[str] = []
     for u in img_urls:
         if u not in seen:
             seen.add(u)
@@ -200,7 +198,7 @@ async def _fetch_episode_image_urls(
     return unique_urls
 
 
-async def _fetch_episode_links(page, list_url: str) -> List[str]:
+async def _fetch_episode_links(page, list_url: str) -> list[str]:
     """Scrape the episode list page and return viewer URLs in oldest-first order.
 
     Webtoons list pages show newest episodes first by default. We reverse the
@@ -240,7 +238,7 @@ async def _fetch_episode_links(page, list_url: str) -> List[str]:
 
     # Episode links live in ul#_listUl li a (Webtoons' canonical list container).
     # Fall back to any anchor whose href contains "/viewer?".
-    links: List[str] = []
+    links: list[str] = []
     seen = set()
 
     # Primary selector.
@@ -271,7 +269,7 @@ async def _fetch_episode_links(page, list_url: str) -> List[str]:
 
 async def fetch_webtoons_images(
     url: str,
-) -> Tuple[List[Tuple[str, str]], str]:
+) -> tuple[list[tuple[str, str]], str]:
     """Fetch image URLs from a Webtoons.com URL.
 
     Returns (urls_to_download, title) where urls_to_download is a list of
@@ -290,7 +288,7 @@ async def fetch_webtoons_images(
         )
 
     title = _extract_title_from_url(url)
-    urls_to_download: List[Tuple[str, str]] = []
+    urls_to_download: list[tuple[str, str]] = []
 
     async with Stealth().use_async(async_playwright()) as p:
         browser = await _launch_browser(p)
@@ -318,38 +316,28 @@ async def fetch_webtoons_images(
                 episode_links = await _fetch_episode_links(page, url)
                 if not episode_links:
                     if not CLEAN_OUTPUT:
-                        console.print(
-                            "[red]No episode links found on the list page.[/]"
-                        )
+                        console.print("[red]No episode links found on the list page.[/]")
                     return [], title
 
                 if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[green]Found {len(episode_links)} episodes.[/]"
-                    )
+                    console.print(f"[green]Found {len(episode_links)} episodes.[/]")
 
                 for idx, ep_url in enumerate(episode_links, start=1):
                     if stop_signal:
                         break
                     if not CLEAN_OUTPUT:
-                        console.print(
-                            f"[yellow]Fetching episode {idx}/{len(episode_links)}...[/]"
-                        )
+                        console.print(f"[yellow]Fetching episode {idx}/{len(episode_links)}...[/]")
                     img_urls = await _fetch_episode_image_urls(page, ep_url)
                     if not img_urls:
                         if not CLEAN_OUTPUT:
-                            console.print(
-                                f"[yellow]No images for episode {idx}; skipping.[/]"
-                            )
+                            console.print(f"[yellow]No images for episode {idx}; skipping.[/]")
                         continue
                     folder = _episode_folder_name(ep_url, idx)
                     urls_to_download.extend((u, folder) for u in img_urls)
             else:
                 # Unknown URL shape — try treating it as a viewer URL.
                 if not CLEAN_OUTPUT:
-                    console.print(
-                        "[yellow]Unrecognized URL shape; trying as viewer URL.[/]"
-                    )
+                    console.print("[yellow]Unrecognized URL shape; trying as viewer URL.[/]")
                 img_urls = await _fetch_episode_image_urls(page, url)
                 folder = _episode_folder_name(url, 1)
                 urls_to_download = [(u, folder) for u in img_urls]
@@ -357,9 +345,7 @@ async def fetch_webtoons_images(
             await browser.close()
 
     if not CLEAN_OUTPUT:
-        table = Table(
-            title="[bold magenta]Webtoons Extraction Summary[/bold magenta]"
-        )
+        table = Table(title="[bold magenta]Webtoons Extraction Summary[/bold magenta]")
         table.add_column("Field", style="cyan", no_wrap=True)
         table.add_column("Value", style="white")
         table.add_row("Title", f"[bold white]{title}[/]")

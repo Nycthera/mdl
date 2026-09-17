@@ -48,15 +48,17 @@ def parse_args():
         action="store_true",
         help="Minimal output: no banner, no progress bars",
     )
-    parser.add_argument(
-        "--md-lang", default=None, help="Language code for MangaDex download"
-    )
+    parser.add_argument("--md-lang", default=None, help="Language code for MangaDex download")
     parser.add_argument(
         "--credits",
         action="store_true",
         help="Show credits and exit",
     )
-    parser.add_argument("--update", action="store_true", help="Update the application")
+    parser.add_argument(
+        "--update",
+        action="store_true",
+        help="Synchronize the locked project dependencies with uv",
+    )
     parser.add_argument(
         "--auto-update-db",
         action="store_true",
