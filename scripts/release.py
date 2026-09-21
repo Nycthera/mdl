@@ -11,10 +11,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = ROOT / "src" / "__init__.py"
+PROJECT_FILE = ROOT / "pyproject.toml"
 # SemVer without build metadata: each version has exactly one release tag.
 VERSION_PATTERN = re.compile(
     r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
@@ -30,8 +32,7 @@ def read_version(path: Path = VERSION_FILE) -> str:
         for node in tree.body
         if isinstance(node, ast.Assign)
         and any(
-            isinstance(target, ast.Name) and target.id == "__version__"
-            for target in node.targets
+            isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets
         )
     ]
     if len(values) != 1 or not isinstance(values[0], str):
@@ -41,8 +42,7 @@ def read_version(path: Path = VERSION_FILE) -> str:
     if not match:
         raise ValueError(f"Invalid version {version!r}; use X.Y.Z or X.Y.Z-rc.1")
     if match[1] and any(
-        part.isdigit() and len(part) > 1 and part.startswith("0")
-        for part in match[1].split(".")
+        part.isdigit() and len(part) > 1 and part.startswith("0") for part in match[1].split(".")
     ):
         raise ValueError("Numeric prerelease identifiers cannot have leading zeros")
     return version
@@ -53,6 +53,16 @@ def validate_tag(version: str, tag: str) -> None:
     if tag != expected:
         raise ValueError(
             f"Tag {tag!r} does not match __version__={version!r}; expected {expected!r}"
+        )
+
+
+def validate_project_version(version: str, path: Path = PROJECT_FILE) -> None:
+    """Require project metadata and application source to use the same version."""
+    with path.open("rb") as stream:
+        project_version = tomllib.load(stream)["project"]["version"]
+    if project_version != version:
+        raise ValueError(
+            f"pyproject.toml version {project_version!r} does not match __version__={version!r}"
         )
 
 
@@ -86,32 +96,37 @@ def build_assets(output: Path, version: str) -> None:
             check=True,
             stdout=subprocess.DEVNULL,
         )
-    for name in ("requirements.txt", "LICENSE"):
+    for name in ("pyproject.toml", "uv.lock", "LICENSE"):
         shutil.copyfile(ROOT / name, output / name)
     (output / "INSTALL.txt").write_text(
         f"MDL v{version}\n\n"
-        "Requires Python 3.13+. Download mdl.py and requirements.txt together.\n"
-        "Create a virtual environment and install dependencies:\n"
-        "  python3 -m venv .venv\n"
-        "  .venv/bin/python -m pip install -r requirements.txt\n"
-        "  .venv/bin/python mdl.py --help\n"
-        "On Windows, use python and .venv\\Scripts\\python.exe instead.\n"
+        "Requires uv and Python 3.13+. Keep mdl.py, pyproject.toml, and uv.lock together.\n"
+        "Install the locked runtime dependencies and run MDL:\n"
+        "  uv sync --locked --no-dev\n"
+        "  uv run --no-dev python mdl.py --help\n"
         "For browser-based sources, also run:\n"
-        "  .venv/bin/python -m playwright install chromium\n\n"
+        "  uv run --no-dev playwright install chromium\n\n"
         "The .py file contains all application source; dependencies and browsers\n"
         "are installed separately. On macOS/Linux, activate the environment and\n"
         "use: install -m 755 mdl.py ~/.local/bin/mdl (create the directory first).\n"
         "Keep that environment active when invoking the installed command.\n",
         encoding="utf-8",
     )
+    shutil.copyfile(ROOT / "release-notes" / f"v{version}.md", output / "RELEASE_NOTES.md")
     assets = [
         output / name
-        for name in ("mdl.py", "requirements.txt", "LICENSE", "INSTALL.txt")
+        for name in (
+            "mdl.py",
+            "pyproject.toml",
+            "uv.lock",
+            "LICENSE",
+            "INSTALL.txt",
+            "RELEASE_NOTES.md",
+        )
     ]
     (output / "SHA256SUMS").write_text(
         "".join(
-            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
-            for path in assets
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in assets
         ),
         encoding="utf-8",
     )
@@ -125,6 +140,7 @@ def main() -> None:
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args()
     version = read_version()
+    validate_project_version(version)
     if args.tag is not None:
         validate_tag(version, args.tag)
     if not args.check_only:

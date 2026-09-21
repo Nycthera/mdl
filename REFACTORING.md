@@ -153,9 +153,9 @@ from src.config import load_config
 
 ```bash
 # Still works the same
-python main.py --manga "manga-name"
-python main.py --manga "https://mangadex.org/title/uuid"
-python main.py --update
+uv run python main.py --manga "manga-name"
+uv run python main.py --manga "https://mangadex.org/title/uuid"
+uv sync --locked
 ```
 
 ## Future Improvements

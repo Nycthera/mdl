@@ -1,13 +1,13 @@
 """Generic scraper for direct image source URLs."""
 
 import asyncio
-from typing import List, Tuple
 
 import aiohttp
 from rich.console import Console
 
 from src.downloader import url_exists
-from src.scrapers import _collect_chapter_urls_for_download, set_clean_output as set_scraper_clean_output
+from src.scrapers import _collect_chapter_urls_for_download
+from src.scrapers import set_clean_output as set_scraper_clean_output
 from src.utils import sanitize_folder_name
 
 console = Console()
@@ -42,12 +42,11 @@ async def _chapter_exists(
     session: aiohttp.ClientSession,
     manga_name: str,
     chapter_label: str,
-    base_urls: List[str],
+    base_urls: list[str],
 ) -> bool:
     """Return whether a chapter has at least one page on any configured source."""
     check_tasks = [
-        url_exists(session, f"{base}{manga_name}/{chapter_label}-001.png")
-        for base in base_urls
+        url_exists(session, f"{base}{manga_name}/{chapter_label}-001.png") for base in base_urls
     ]
     return any(await asyncio.gather(*check_tasks))
 
@@ -60,7 +59,7 @@ async def gather_all_urls(
     max_decimals: int = 5,
     workers: int = 10,
     folder_base: str | None = None,
-) -> List[Tuple[str, str]]:
+) -> list[tuple[str, str]]:
     """Gather all available page URLs for a manga."""
     urls_to_download = []
     folder_base = folder_base or sanitize_folder_name(manga_name)
@@ -80,9 +79,7 @@ async def gather_all_urls(
                 break
 
             chapter_str = f"{chapter:04d}"
-            found_any = await _chapter_exists(
-                session, manga_name, chapter_str, BASE_URLS
-            )
+            found_any = await _chapter_exists(session, manga_name, chapter_str, BASE_URLS)
 
             if found_any:
                 found_urls, chapter_folder = await _collect_chapter_urls_for_download(
@@ -97,16 +94,12 @@ async def gather_all_urls(
                 )
                 urls_to_download.extend((url, chapter_folder) for url in found_urls)
                 if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[green]Chapter {chapter_str}: {len(found_urls)} pages found[/]"
-                    )
+                    console.print(f"[green]Chapter {chapter_str}: {len(found_urls)} pages found[/]")
 
             decimal_found_any = False
             for dec in range(1, max_decimals + 1):
                 chapter_decimal_str = f"{chapter_str}.{dec}"
-                if not await _chapter_exists(
-                    session, manga_name, chapter_decimal_str, BASE_URLS
-                ):
+                if not await _chapter_exists(session, manga_name, chapter_decimal_str, BASE_URLS):
                     continue
 
                 decimal_found_any = True
@@ -128,9 +121,7 @@ async def gather_all_urls(
 
             if not found_any and not decimal_found_any:
                 if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[red]Chapter {chapter_str} not found. Stopping.[/]"
-                    )
+                    console.print(f"[red]Chapter {chapter_str} not found. Stopping.[/]")
                 break
 
             chapter += 1

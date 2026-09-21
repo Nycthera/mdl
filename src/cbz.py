@@ -1,88 +1,67 @@
 """CBZ (Comic Book Archive) creation functionality."""
 
 import os
+import shutil
+import tempfile
 import zipfile
+
 from rich.console import Console
 
 from src.utils import sanitize_folder_name
 
 console = Console()
-
-# Global state
 CLEAN_OUTPUT = False
 
 
 def set_clean_output(value: bool) -> None:
-    """Set the clean output mode globally."""
     global CLEAN_OUTPUT
     CLEAN_OUTPUT = value
 
 
 def create_cbz_for_all(folder_path: str) -> str | None:
-    """Create a CBZ archive from the folder structure."""
+    """Atomically merge downloaded files into an archive, retaining source files.
+
+    Older versions removed chapter folders after packaging. Preserve their
+    archived entries when adding new chapters, and never truncate a good archive
+    before its replacement has been completely written.
+    """
     base_folder = os.path.abspath(folder_path)
-
-    # Defensive checks: folder must exist and have files to archive
     if not os.path.isdir(base_folder):
-        if not CLEAN_OUTPUT:
-            console.print(
-                f"[red]Folder does not exist, skipping CBZ creation: {base_folder}[/]"
-            )
         return None
-
-    # Ensure there's at least one file (excluding existing .cbz) to archive
-    has_files = False
+    cbz_name = os.path.join(
+        base_folder, f"{sanitize_folder_name(os.path.basename(base_folder))}.cbz"
+    )
+    files_to_add = {}
     for root, dirs, files in os.walk(base_folder):
-        for f in files:
-            if not f.lower().endswith(".cbz"):
-                has_files = True
-                break
-        if has_files:
-            break
-
-    if not has_files:
-        if not CLEAN_OUTPUT:
-            console.print(
-                f"[red]No files found in {base_folder}; skipping CBZ creation.[/]"
-            )
+        dirs[:] = sorted(d for d in dirs if not os.path.islink(os.path.join(root, d)))
+        for name in sorted(files):
+            path = os.path.join(root, name)
+            if (
+                name.lower().endswith(".cbz")
+                or name.startswith(".pending_")
+                or os.path.islink(path)
+            ):
+                continue
+            files_to_add[os.path.relpath(path, base_folder).replace(os.sep, "/")] = path
+    if not files_to_add:
         return None
 
-    base_name = os.path.basename(base_folder)
-    safe_base_name = sanitize_folder_name(base_name)
-    # Place the CBZ inside the manga root folder
-    cbz_name = os.path.join(base_folder, f"{safe_base_name}.cbz")
-    if not CLEAN_OUTPUT:
-        console.print(f"[magenta]Creating CBZ archive: {cbz_name}[/]")
-
-    # Create the CBZ
-    with zipfile.ZipFile(cbz_name, "w") as cbz:
-        for root, dirs, files in os.walk(base_folder):
-            files = sorted(files)
-            for file in files:
-                file_path = os.path.join(root, file)
-                # avoid adding the cbz itself if it's inside the folder
-                if os.path.abspath(file_path) == os.path.abspath(cbz_name):
-                    continue
-                arcname = os.path.relpath(file_path, base_folder)
-                cbz.write(file_path, arcname=arcname)
-
+    fd, pending = tempfile.mkstemp(prefix=".pending_", suffix=".cbz", dir=base_folder)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(pending, "w") as target:
+            if os.path.exists(cbz_name):
+                with zipfile.ZipFile(cbz_name) as previous:
+                    for entry in previous.infolist():
+                        if entry.filename not in files_to_add:
+                            with previous.open(entry) as source, target.open(entry, "w") as dest:
+                                shutil.copyfileobj(source, dest)
+            for name, path in sorted(files_to_add.items()):
+                target.write(path, arcname=name)
+        os.replace(pending, cbz_name)
+    finally:
+        if os.path.exists(pending):
+            os.unlink(pending)
     if not CLEAN_OUTPUT:
         console.print(f"[magenta]Created {cbz_name}[/]")
-
-    # Delete only subfolders (per chapter folders) inside the manga root folder
-    for item in os.listdir(base_folder):
-        item_path = os.path.join(base_folder, item)
-        # don't remove the generated cbz file
-        if item.lower().endswith(".cbz"):
-            continue
-        if os.path.isdir(item_path):
-            try:
-                import shutil
-                shutil.rmtree(item_path)
-                if not CLEAN_OUTPUT:
-                    console.print(f"[green]Deleted folder {item_path}[/]")
-            except OSError as e:
-                if not CLEAN_OUTPUT:
-                    console.print(f"[red]Failed to delete {item_path}: {e}[/]")
-
     return cbz_name

@@ -67,10 +67,7 @@ assert db.has_new_mangadex_release(1, 2)
     env = os.environ.copy()
     env["HOME"] = str(bundle.parent / "home")
     subprocess.run(
-        [sys.executable, "-I", "-c", code, str(bundle)],
-        cwd=bundle.parent,
-        env=env,
-        check=True,
+        [sys.executable, "-I", "-c", code, str(bundle)], cwd=bundle.parent, env=env, check=True
     )
 
 
@@ -105,7 +102,6 @@ def test_preserve_existing_command(tmp_path, broken_symlink):
         ],
         text=True,
         capture_output=True,
-        check=False,
     )
     assert result.returncode != 0
     assert "Refusing to overwrite" in result.stderr
