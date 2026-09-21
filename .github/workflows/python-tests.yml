@@ -60,6 +60,7 @@ jobs:
             dist/release/pyproject.toml
             dist/release/uv.lock
             dist/release/LICENSE
+            dist/release/RELEASE_NOTES.md
             dist/release/INSTALL.txt
             dist/release/SHA256SUMS
           if-no-files-found: error
@@ -86,9 +87,9 @@ jobs:
           RELEASE_TAG: ${{ needs.test-build.outputs.tag }}
           PRERELEASE: ${{ needs.test-build.outputs.prerelease }}
         run: |
-          args=(--verify-tag --title "MDL $RELEASE_TAG" --generate-notes)
+          args=(--verify-tag --title "MDL $RELEASE_TAG" --notes-file assets/RELEASE_NOTES.md --generate-notes)
           if [[ "$PRERELEASE" == true ]]; then
             args+=(--prerelease --latest=false)
           fi
           gh release create "$RELEASE_TAG" assets/mdl.py assets/pyproject.toml assets/uv.lock \
-            assets/LICENSE assets/INSTALL.txt assets/SHA256SUMS "${args[@]}"
+            assets/LICENSE assets/INSTALL.txt assets/RELEASE_NOTES.md assets/SHA256SUMS "${args[@]}"

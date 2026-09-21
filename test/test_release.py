@@ -60,8 +60,12 @@ def test_release_assets_and_checksums(tmp_path):
         "uv.lock",
         "LICENSE",
         "INSTALL.txt",
+        "RELEASE_NOTES.md",
         "SHA256SUMS",
     }
+    assert (tmp_path / "RELEASE_NOTES.md").read_bytes() == (
+        ROOT / "release-notes" / f"v{release['read_version']()}.md"
+    ).read_bytes()
     assert (tmp_path / "mdl.py").read_text().startswith("#!/usr/bin/env python3\n")
     for line in (tmp_path / "SHA256SUMS").read_text().splitlines():
         checksum, name = line.split("  ")

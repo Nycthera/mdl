@@ -83,10 +83,6 @@ mdl --help
 
 See the [installation guide](INSTALLATION.md) for build-only and custom-location options.
 
-### Web Dashboard
-
-The repository also includes a Django web app in [mdl-website/README.md](mdl-website/README.md) with login, signup, a protected dashboard, and JSON endpoints backed by Django's built-in auth database.
-
 #### Convenience setup scripts
 
 ```bash
@@ -139,6 +135,9 @@ uv run python main.py -M "naruto" --workers 20 --max-pages 150
 # Download with CBZ archive creation
 uv run python main.py -M "attack-on-titan" --cbz
 
+# Keep folders without creating an archive
+uv run python main.py -M "attack-on-titan" --no-cbz
+
 # Download specific chapter range
 uv run python main.py -M "demon-slayer" --start-chapter 50 --start-page 1
 
@@ -186,6 +185,12 @@ uv run python main.py --auto-update-db
 ```
 
 Detailed guide: [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md)
+
+### Archive safety
+
+CBZ updates preserve chapters already in the existing archive and replace the archive
+only after the new file is written successfully. Source chapter folders are retained
+for resuming downloads. Incomplete download batches are not automatically packaged.
 
 ### Configuration
 
@@ -266,7 +271,8 @@ Runtime dependencies are declared in `pyproject.toml` and resolved exactly in
 
 ### Publishing a release
 
-Set `__version__` in [src/__init__.py](src/__init__.py), commit the change, and push
+Set matching versions in [src/__init__.py](src/__init__.py) and `pyproject.toml`,
+run `uv lock`, and write `release-notes/vX.Y.Z.md`. Commit the changes and push
 the matching `v` tag. For example, after setting the version to `3.5.1`:
 
 ```bash
@@ -278,7 +284,7 @@ git push origin v3.5.1
 The tagged commit must include the workflow, `install_single.py`, and
 `scripts/release.py`. GitHub Actions rejects mismatched tags, runs tests, builds
 and verifies the single-file program, then publishes `mdl.py`, `pyproject.toml`,
-`uv.lock`, `LICENSE`, `INSTALL.txt`, and `SHA256SUMS` to that tag's release. These source assets
+`uv.lock`, `LICENSE`, `INSTALL.txt`, `RELEASE_NOTES.md`, and `SHA256SUMS` to that tag's release. These source assets
 replace the previous PyInstaller platform binaries. Python 3.13+ and dependencies
 are still required; follow `INSTALL.txt` from the release.
 
@@ -358,7 +364,7 @@ chmod 755 manga-folder
 ## 📊 Project Statistics
 
 - **Lines of Code**: ~3,500 (modular, well-documented)
-- **Test Coverage**: 95%+
+- **Tests**: Run `uv run python -m pytest -q`; coverage percentage is not currently measured.
 - **Supported Platforms**: Windows 10+, macOS 10.13+, Ubuntu 18.04+
 - **Python Version**: 3.13+ (uses latest language features)
 - **Async Tasks**: Up to 50 concurrent downloads

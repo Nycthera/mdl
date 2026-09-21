@@ -253,8 +253,8 @@ def record_download(
             ) VALUES (?, ?, ?, ?)
             ON CONFLICT(manga_name) DO UPDATE SET
                 date_last_checked = excluded.date_last_checked,
-                latest_chapter_local = excluded.latest_chapter_local,
-                latest_chapter_from_mangadex = excluded.latest_chapter_from_mangadex
+                latest_chapter_local = MAX(manga_data.latest_chapter_local, excluded.latest_chapter_local),
+                latest_chapter_from_mangadex = MAX(manga_data.latest_chapter_from_mangadex, excluded.latest_chapter_from_mangadex)
             """,
             (
                 manga_name,

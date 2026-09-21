@@ -86,8 +86,12 @@ def test_install_and_reinstall(tmp_path):
         assert "--workers" in run_bundle(destination / "mdl", "--help").stdout
 
 
-def test_preserve_existing_command(tmp_path):
-    (tmp_path / "mdl").write_text("existing command")
+@pytest.mark.parametrize("broken_symlink", [False, True])
+def test_preserve_existing_command(tmp_path, broken_symlink):
+    if broken_symlink:
+        (tmp_path / "mdl").symlink_to("missing-command")
+    else:
+        (tmp_path / "mdl").write_text("existing command")
     result = subprocess.run(
         [
             sys.executable,
@@ -101,4 +105,7 @@ def test_preserve_existing_command(tmp_path):
     )
     assert result.returncode != 0
     assert "Refusing to overwrite" in result.stderr
-    assert (tmp_path / "mdl").read_text() == "existing command"
+    if broken_symlink:
+        assert os.readlink(tmp_path / "mdl") == "missing-command"
+    else:
+        assert (tmp_path / "mdl").read_text() == "existing command"

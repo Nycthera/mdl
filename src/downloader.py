@@ -14,6 +14,7 @@ Speed wins ported from AIO-Webtoon-Downloader:
 import asyncio
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 
 import aiohttp
 from rich.console import Console
@@ -35,7 +36,7 @@ from src.http import (
     get_default_timeout,
     get_host_cap,
 )
-from src.utils import Colors, _cancel_pending_tasks, _loop_time
+from src.utils import Colors, _cancel_pending_tasks, _loop_time, image_filename
 
 console = Console()
 
@@ -103,7 +104,7 @@ async def download_image(
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
 
     os.makedirs(folder, exist_ok=True)
-    filename = os.path.basename(url) or "image.bin"
+    filename = image_filename(url)
     filepath = os.path.join(folder, filename)
 
     if os.path.exists(filepath):
@@ -258,8 +259,18 @@ def _build_connector(max_workers: int) -> aiohttp.TCPConnector:
         limit=limit,
         limit_per_host=limit_per_host,
         force_close=False,
-        enable_cleanup_closed=True,
     )
+
+
+@dataclass
+class DownloadResult:
+    successful_pages: int
+    total_pages: int
+    completed_folders: list[str]
+
+    @property
+    def complete(self) -> bool:
+        return self.successful_pages == self.total_pages
 
 
 async def download_all_pages(
@@ -269,15 +280,16 @@ async def download_all_pages(
     track_to_db: bool = True,
     max_retries: int = 5,
     referer: str | None = None,
-) -> None:
+) -> DownloadResult:
     """Download all pages with progress tracking.
 
     Set track_to_db=False when the caller will handle a single consolidated DB write.
     Set referer=... for sources with anti-hotlink protection (e.g. Webtoons).
     """
+    urls_to_download = list(dict.fromkeys(urls_to_download))
     total_pages = len(urls_to_download)
     if total_pages == 0:
-        return
+        return DownloadResult(0, 0, [])
 
     # Sync makedirs is cheap and avoids an asyncio.to_thread call per folder.
     for _, folder in urls_to_download:
@@ -306,42 +318,46 @@ async def download_all_pages(
 
         tasks = [asyncio.create_task(download_worker(item)) for item in urls_to_download]
 
-        if not CLEAN_OUTPUT:
-            with Progress(
-                SpinnerColumn(style="green"),
-                TextColumn("[bold green]Downloading[/]"),
-                BarColumn(),
-                "[progress.percentage]{task.percentage:>3.1f}%",
-                "•",
-                TextColumn("{task.fields[pages_per_sec]} pages/sec"),
-                TimeElapsedColumn(),
-                TimeRemainingColumn(),
-                console=console,
-                transient=True,
-            ) as progress:
-                task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
+        try:
+            if not CLEAN_OUTPUT:
+                with Progress(
+                    SpinnerColumn(style="green"),
+                    TextColumn("[bold green]Downloading[/]"),
+                    BarColumn(),
+                    "[progress.percentage]{task.percentage:>3.1f}%",
+                    "•",
+                    TextColumn("{task.fields[pages_per_sec]} pages/sec"),
+                    TimeElapsedColumn(),
+                    TimeRemainingColumn(),
+                    console=console,
+                    transient=True,
+                ) as progress:
+                    task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
 
-                start_time = _loop_time()
-                completed = 0
+                    start_time = _loop_time()
+                    completed = 0
+                    for future in asyncio.as_completed(tasks):
+                        item, result = await future
+                        page_results[item] = result
+                        completed += 1
+                        if stop_signal:
+                            await _cancel_pending_tasks(tasks)
+                            break
+                        elapsed = max(_loop_time() - start_time, 0.001)
+                        pps = completed / elapsed
+                        progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
+                        if "Failed" in result or "HTTP" in result:
+                            console.print(result)
+            else:
                 for future in asyncio.as_completed(tasks):
                     item, result = await future
                     page_results[item] = result
-                    completed += 1
                     if stop_signal:
                         await _cancel_pending_tasks(tasks)
                         break
-                    elapsed = max(_loop_time() - start_time, 0.001)
-                    pps = completed / elapsed
-                    progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
-                    if "Failed" in result or "HTTP" in result:
-                        console.print(result)
-        else:
-            for future in asyncio.as_completed(tasks):
-                item, result = await future
-                page_results[item] = result
-                if stop_signal:
-                    await _cancel_pending_tasks(tasks)
-                    break
+
+        finally:
+            await _cancel_pending_tasks(tasks)
 
     if track_to_db and not stop_signal and urls_to_download:
         try:
@@ -376,3 +392,7 @@ async def download_all_pages(
         console.print(
             f"[bold blue][db][/bold blue] Skipping save for '{manga_name}' because no pages were queued"
         )
+
+    completed_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
+    successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    return DownloadResult(successful_pages, total_pages, completed_folders)

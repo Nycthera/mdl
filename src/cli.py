@@ -16,13 +16,33 @@ def _workers_type(value: str) -> int:
     return v
 
 
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
+def _chapter_type(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer") from None
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be a nonnegative integer")
+    return number
+
+
 def parse_args():
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Manga Downloader CLI")
     parser.add_argument("-M", "--manga", help="Manga name or MangaDex URL")
-    parser.add_argument("--start-chapter", type=int)
-    parser.add_argument("--start-page", type=int)
-    parser.add_argument("--max-pages", type=int)
+    parser.add_argument("--start-chapter", type=_chapter_type)
+    parser.add_argument("--start-page", type=_positive_int)
+    parser.add_argument("--max-pages", type=_positive_int)
     parser.add_argument(
         "--workers",
         type=_workers_type,
@@ -30,19 +50,19 @@ def parse_args():
     )
     parser.add_argument(
         "--max-retries",
-        type=int,
+        type=_positive_int,
         default=5,
         help="Max retry attempts per failed image (default: 5). Uses classified "
         "backoff: 429 backs off 3-12s, 5xx uses exponential, 4xx fails fast.",
     )
     parser.add_argument(
         "--timeout",
-        type=int,
+        type=_positive_int,
         default=30,
         help="Per-request timeout in seconds (default: 30). "
         "Applies to connect + read; image downloads cap at this total.",
     )
-    parser.add_argument("--cbz", action="store_true")
+    parser.add_argument("--cbz", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument(
         "--clean-output",
         action="store_true",

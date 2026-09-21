@@ -1,6 +1,6 @@
 [project]
 name = "mdl"
-version = "3.5.0"
+version = "3.5.1"
 description = "A multi-source manga downloader"
 readme = "README.md"
 requires-python = ">=3.13"

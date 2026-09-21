@@ -95,6 +95,9 @@ MANGA_DB_VERBOSE=1 uv run python main.py --auto-update-db
 
 ## Notes
 
-- The current schema tracks manga by `manga_name` only.
+- The current schema tracks manga by `manga_name` only, without source URLs or IDs.
+- Auto-update probes the generic direct-image hosts, including when cached chapter
+  numbers match. It cannot reliably resume MangaDex or browser-source titles from
+  this schema; rerun their original source URL to check for updates.
 - For best accuracy, keep names consistent with download folder naming.
 - MangaDex flow performs one consolidated DB write at the end of the manga run.

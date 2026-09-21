@@ -57,12 +57,16 @@ def extract_manga_name_from_url(manga_input: str) -> str:
 def sanitize_folder_name(name: str) -> str:
     """Remove illegal characters from folder/file names."""
     # Replace illegal filesystem characters with underscore, but keep spaces
-    cleaned = re.sub(r'[<>:"/\\|?*]', "", name)
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
     # Replace underscores/hyphens that were used as separators with spaces
     cleaned = cleaned.replace("_", " ")
     cleaned = cleaned.replace("-", " ")
     # Collapse multiple spaces into one and trim
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().rstrip(". ")
+    if not cleaned:
+        return "Untitled"
+    if re.fullmatch(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", cleaned.split(".")[0], re.I):
+        cleaned = "_" + cleaned
     return cleaned
 
 
@@ -115,3 +119,14 @@ def safe_delete_folder(folder_path: str) -> None:
         console.print(f"[green]Deleted folder {folder_path} after CBZ creation[/]")
     except Exception as e:
         console.print(f"[red]Failed to delete {folder_path}: {e}[/]")
+
+
+def image_filename(url: str) -> str:
+    """Use only a URL path component, never a query string, as a filename."""
+    name = urlparse(url).path.rsplit("/", 1)[-1]
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", name).rstrip(". ")
+    if not name:
+        return "image.bin"
+    if re.fullmatch(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", name.split(".")[0], re.I):
+        name = "_" + name
+    return name

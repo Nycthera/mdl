@@ -33,6 +33,8 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from src.utils import image_filename
+
 # ---------------------------------------------------------------------------
 # 1. Tuned session builder
 # ---------------------------------------------------------------------------
@@ -41,9 +43,8 @@ import aiohttp
 DEFAULT_CONNECTOR_KWARGS = dict(
     limit=64,  # total in-flight connections across all hosts
     limit_per_host=32,  # per-host ceiling (will be further capped by AIMD)
-    ttl=30,  # idle connection TTL in seconds (keepalive)
+    keepalive_timeout=30,  # idle connection TTL in seconds (keepalive)
     force_close=False,  # keep connections alive (HTTP keep-alive)
-    enable_cleanup_closed=True,  # close SSL sockets cleanly (avoid ResourceWarning)
 )
 
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
@@ -340,7 +341,7 @@ async def download_image_streaming(
         return False, "interrupted"
 
     os.makedirs(folder, exist_ok=True)
-    filename = os.path.basename(url) or "image.bin"
+    filename = image_filename(url)
     filepath = os.path.join(folder, filename)
     if os.path.exists(filepath):
         return True, f"already-downloaded:{filename}"

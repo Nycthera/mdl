@@ -142,6 +142,8 @@ def main() -> None:
         "--playwright", action="store_true", help="Also install Playwright Chromium"
     )
     args = parser.parse_args()
+    if sys.version_info < (3, 13):  # noqa: UP036 - installer may run before env setup
+        parser.error("MDL requires Python 3.13 or newer")
     if args.build_only:
         build(args.output.expanduser().absolute())
         print(f"Built {args.output}")
@@ -183,7 +185,9 @@ def main() -> None:
         destination = args.bin_dir.expanduser().absolute()
         destination.mkdir(parents=True, exist_ok=True)
         command = destination / "mdl"
-        if command.exists() and not (command.is_symlink() and os.readlink(command) == "mdl.py"):
+        if (command.exists() or command.is_symlink()) and not (
+            command.is_symlink() and os.readlink(command) == "mdl.py"
+        ):
             parser.error(
                 f"Refusing to overwrite existing command: {command}; choose another --bin-dir"
             )

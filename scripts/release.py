@@ -112,8 +112,17 @@ def build_assets(output: Path, version: str) -> None:
         "Keep that environment active when invoking the installed command.\n",
         encoding="utf-8",
     )
+    shutil.copyfile(ROOT / "release-notes" / f"v{version}.md", output / "RELEASE_NOTES.md")
     assets = [
-        output / name for name in ("mdl.py", "pyproject.toml", "uv.lock", "LICENSE", "INSTALL.txt")
+        output / name
+        for name in (
+            "mdl.py",
+            "pyproject.toml",
+            "uv.lock",
+            "LICENSE",
+            "INSTALL.txt",
+            "RELEASE_NOTES.md",
+        )
     ]
     (output / "SHA256SUMS").write_text(
         "".join(
