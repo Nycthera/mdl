@@ -28,7 +28,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: pip
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.11.32"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
       - name: Validate source version and release tag
         id: version
         env:
@@ -39,23 +44,23 @@ jobs:
           if [[ "$REF_TYPE" == tag ]]; then
             args+=(--tag "$REF_NAME")
           fi
-          python scripts/release.py "${args[@]}"
-      - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+          uv run python scripts/release.py "${args[@]}"
       - name: Run tests
-        run: python -m pytest -q
+        run: uv run python -m pytest -q
       - name: Build and verify release assets
         env:
           RELEASE_TAG: ${{ steps.version.outputs.tag }}
-        run: python scripts/release.py --tag "$RELEASE_TAG"
+        run: uv run python scripts/release.py --tag "$RELEASE_TAG"
       - name: Upload tested assets
         uses: actions/upload-artifact@v4
         with:
           name: mdl-${{ steps.version.outputs.tag }}
           path: |
             dist/release/mdl.py
-            dist/release/requirements.txt
+            dist/release/pyproject.toml
+            dist/release/uv.lock
             dist/release/LICENSE
+            dist/release/RELEASE_NOTES.md
             dist/release/INSTALL.txt
             dist/release/SHA256SUMS
           if-no-files-found: error
@@ -82,9 +87,9 @@ jobs:
           RELEASE_TAG: ${{ needs.test-build.outputs.tag }}
           PRERELEASE: ${{ needs.test-build.outputs.prerelease }}
         run: |
-          args=(--verify-tag --title "MDL $RELEASE_TAG" --generate-notes)
+          args=(--verify-tag --title "MDL $RELEASE_TAG" --notes-file assets/RELEASE_NOTES.md --generate-notes)
           if [[ "$PRERELEASE" == true ]]; then
             args+=(--prerelease --latest=false)
           fi
-          gh release create "$RELEASE_TAG" assets/mdl.py assets/requirements.txt \
-            assets/LICENSE assets/INSTALL.txt assets/SHA256SUMS "${args[@]}"
+          gh release create "$RELEASE_TAG" assets/mdl.py assets/pyproject.toml assets/uv.lock \
+            assets/LICENSE assets/INSTALL.txt assets/RELEASE_NOTES.md assets/SHA256SUMS "${args[@]}"

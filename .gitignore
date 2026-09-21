@@ -41,3 +41,6 @@ test.py
 
 # Database files
 *.db
+
+
+# Keep uv.lock tracked: CI and release installation use --locked.

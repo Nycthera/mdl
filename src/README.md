@@ -95,13 +95,16 @@ Each module can be tested independently:
 ```python
 # Test config
 from src.config import load_config
+
 config = load_config()
 
 # Test utils
 from src.utils import sanitize_folder_name
+
 safe_name = sanitize_folder_name("Invalid/Name")
 
 # Test scrapers
 from src.scrapers.generic import gather_all_urls
+
 urls = asyncio.run(gather_all_urls("manga-name"))
 ```

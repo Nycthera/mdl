@@ -9,7 +9,7 @@ The auto-update mode reads tracked manga from SQLite and checks each title for n
 Command:
 
 ```bash
-python3 main.py --auto-update-db
+uv run python main.py --auto-update-db
 ```
 
 For each tracked row in `manga_data`, MDL:
@@ -31,17 +31,17 @@ Default path:
 Override with environment variable:
 
 ```bash
-MANGA_DB_PATH=/absolute/path/to/your.db python3 main.py --auto-update-db
+MANGA_DB_PATH=/absolute/path/to/your.db uv run python main.py --auto-update-db
 ```
 
 ## Useful Flags
 
 ```bash
 # Minimal output
-python3 main.py --auto-update-db --clean-output
+uv run python main.py --auto-update-db --clean-output
 
 # Higher concurrency
-python3 main.py --auto-update-db --workers 20
+uv run python main.py --auto-update-db --workers 20
 ```
 
 ## Manual Test Flow
@@ -61,7 +61,7 @@ SET latest_chapter_local = 1,
 WHERE manga_name = 'one piece';
 "
 
-python3 main.py --auto-update-db
+uv run python main.py --auto-update-db
 
 sqlite3 ~/.config/manga_downloader/manga_collection.db "
 SELECT manga_name, latest_chapter_local, latest_chapter_from_mangadex,
@@ -83,18 +83,21 @@ DB stage logs are printed when `--dev` is used and are prefixed with `[db]`:
 Enable DB logs:
 
 ```bash
-python3 main.py --auto-update-db --dev
+uv run python main.py --auto-update-db --dev
 ```
 
 Optional environment overrides:
 
 ```bash
-MANGA_DB_VERBOSE=0 python3 main.py --auto-update-db
-MANGA_DB_VERBOSE=1 python3 main.py --auto-update-db
+MANGA_DB_VERBOSE=0 uv run python main.py --auto-update-db
+MANGA_DB_VERBOSE=1 uv run python main.py --auto-update-db
 ```
 
 ## Notes
 
-- The current schema tracks manga by `manga_name` only.
+- The current schema tracks manga by `manga_name` only, without source URLs or IDs.
+- Auto-update probes the generic direct-image hosts, including when cached chapter
+  numbers match. It cannot reliably resume MangaDex or browser-source titles from
+  this schema; rerun their original source URL to check for updates.
 - For best accuracy, keep names consistent with download folder naming.
 - MangaDex flow performs one consolidated DB write at the end of the manga run.

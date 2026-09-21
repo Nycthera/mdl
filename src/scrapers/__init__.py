@@ -99,4 +99,11 @@ async def _collect_chapter_urls_for_download(
     found_urls = await _collect_existing_urls(
         urls, f"Checking Chapter {chapter_label}", workers, session
     )
-    return found_urls, chapter_folder
+    # Probe completion order is nondeterministic. Use source priority and select
+    # one mirror per filename so concurrent downloads cannot overwrite each other.
+    available = set(found_urls)
+    selected = {}
+    for url in urls:
+        if url in available:
+            selected.setdefault(url.rsplit("/", 1)[-1], url)
+    return list(selected.values()), chapter_folder

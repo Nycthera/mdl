@@ -4,6 +4,7 @@
 import argparse
 import os
 import pprint
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -86,9 +87,7 @@ def build(output: Path, python: str | None = None) -> None:
     shebang = "#!/usr/bin/env python3"
     if python:
         if any(c.isspace() for c in python) or len(os.fsencode(python)) > 120:
-            raise ValueError(
-                "Interpreter path must have no whitespace and be <=120 bytes"
-            )
+            raise ValueError("Interpreter path must have no whitespace and be <=120 bytes")
         shebang = "#!" + python
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     content = (
@@ -132,9 +131,7 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "mdl.py")
     parser.add_argument("--bin-dir", type=Path, default=Path.home() / ".local" / "bin")
     parser.add_argument(
-        "--venv-dir",
-        type=Path,
-        default=Path.home() / ".local" / "share" / "mdl" / "venv",
+        "--venv-dir", type=Path, default=Path.home() / ".local" / "share" / "mdl" / "venv"
     )
     parser.add_argument(
         "--skip-deps",
@@ -145,25 +142,29 @@ def main() -> None:
         "--playwright", action="store_true", help="Also install Playwright Chromium"
     )
     args = parser.parse_args()
-    if sys.version_info < (3, 13):
+    if sys.version_info < (3, 13):  # noqa: UP036 - installer may run before env setup
         parser.error("MDL requires Python 3.13 or newer")
     if args.build_only:
         build(args.output.expanduser().absolute())
         print(f"Built {args.output}")
         return
     if os.name != "posix":
-        parser.error(
-            "Command installation supports macOS/Linux; use --build-only on Windows"
-        )
+        parser.error("Command installation supports macOS/Linux; use --build-only on Windows")
     python = sys.executable
     if not args.skip_deps:
+        uv = shutil.which("uv")
+        if uv is None:
+            parser.error("uv is required; install it from https://docs.astral.sh/uv/")
         venv = args.venv_dir.expanduser().absolute()
-        subprocess.run([python, "-m", "venv", str(venv)], check=True)
-        python = str(venv / "bin" / "python")
+        environment = os.environ.copy()
+        environment.pop("VIRTUAL_ENV", None)
+        environment["UV_PROJECT_ENVIRONMENT"] = str(venv)
         subprocess.run(
-            [python, "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")],
+            [uv, "sync", "--locked", "--no-dev", "--project", str(ROOT)],
             check=True,
+            env=environment,
         )
+        python = str(venv / "bin" / "python")
     if args.playwright:
         subprocess.run([python, "-m", "playwright", "install", "chromium"], check=True)
     # Smoke-test away from the checkout before replacing the installed command.

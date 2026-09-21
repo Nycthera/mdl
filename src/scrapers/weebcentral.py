@@ -2,14 +2,14 @@
 
 import asyncio
 import re
-from typing import List, Tuple
 from urllib.parse import urljoin
 
-from playwright.async_api import Error as PlaywrightError, async_playwright
+from playwright.async_api import Error as PlaywrightError
+from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
+from rich.align import Align
 from rich.console import Console
 from rich.panel import Panel
-from rich.align import Align
 from rich.table import Table
 
 console = Console()
@@ -27,7 +27,7 @@ def set_clean_output(value: bool) -> None:
     CLEAN_OUTPUT = value
 
 
-def extract_title_from_image_urls(img_urls: List[str]) -> str:
+def extract_title_from_image_urls(img_urls: list[str]) -> str:
     """Extract manga title from image URLs."""
     for url in img_urls:
         match = TITLE_PATTERN.search(url)
@@ -36,7 +36,7 @@ def extract_title_from_image_urls(img_urls: List[str]) -> str:
     return "Unknown_Title"
 
 
-async def fetch_weebcentral_images(url: str) -> Tuple[List[str], str]:
+async def fetch_weebcentral_images(url: str) -> tuple[list[str], str]:
     """Fetch images from WeebCentral using Playwright."""
     if not CLEAN_OUTPUT:
         console.print(
@@ -114,9 +114,7 @@ async def fetch_weebcentral_images(url: str) -> Tuple[List[str], str]:
 
         if not CLEAN_OUTPUT:
             # --- Fancy summary table ---
-            table = Table(
-                title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
-            )
+            table = Table(title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]")
             table.add_column("Field", style="cyan", no_wrap=True)
             table.add_column("Value", style="white")
 
@@ -124,11 +122,7 @@ async def fetch_weebcentral_images(url: str) -> Tuple[List[str], str]:
             table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
             table.add_row(
                 "Status",
-                (
-                    "[bold green]Success[/]"
-                    if img_urls
-                    else "[bold red]No images found[/]"
-                ),
+                ("[bold green]Success[/]" if img_urls else "[bold red]No images found[/]"),
             )
 
             console.print()

@@ -1,292 +1,162 @@
-# FOR_AI.md - MDL Project Context for AI Assistants
+# MDL project context for AI assistants
 
-## Project Overview
+Updated 2026-09-21 after the code review documented in [CODE_REVIEW.md](CODE_REVIEW.md).
+Treat source code and the dependency lockfile as authoritative when documentation differs.
 
-**MDL (Multi-Source Manga Downloader)** is a sophisticated, high-performance manga downloading solution featuring concurrent processing, multi-source integration, and comprehensive error handling. It demonstrates advanced system design patterns and full-stack development skills.
+MDL is a Python CLI for downloading manga from direct image hosts, the MangaDex API,
+and browser-based sources. The application version is **3.5.1**, defined in both
+`src/__init__.py` and `pyproject.toml`. It requires Python 3.13+ and uses GPL-3.0-only
+licensing. There is no application dashboard or Node.js API server in this checkout.
 
-**Version:** 3.3 stable  
-**License:** GNU General Public License v3.0  
-**Primary Language:** Python 3.13  
-**Architecture:** Single Python CLI application with async/await concurrency
+Runtime dependencies are aiohttp, Rich, Playwright, and playwright-stealth.
+Development dependencies are pytest, pytest-asyncio, and Ruff. Exact versions are
+resolved in `uv.lock`; use `uv sync --locked` to create the environment. Chromium is
+needed for browser sources and can be installed with `uv run playwright install chromium`.
 
-## Core Technology Stack
+| File | Responsibility |
+| --- | --- |
+| `main.py` | CLI orchestration, source routing, global output/stop state, summaries, DB auto-update |
+| `src/cli.py` | Arguments and numeric CLI validation |
+| `src/config.py` | Configuration defaults, validation, atomic saves |
+| `src/downloader.py` | Concurrent image downloads, retry handling, batch results, progress, DB tracking |
+| `src/http.py` | Shared timeouts, session builder, failure classification, backoff, HTTP helpers |
+| `src/rate_limiter.py` | Async API request throttling |
+| `src/cbz.py` | Atomic archive updates that preserve existing entries and source folders |
+| `src/utils.py` | Title/filename sanitization, slug handling, cancellation helpers |
+| `src/database/manga_db.py` | SQLite schema, legacy migration, chapter tracking |
+| `src/scrapers/__init__.py` | Direct-host page probing and mirror selection |
+| `src/scrapers/generic.py` | Integer/decimal chapter discovery on direct image hosts |
+| `src/scrapers/mangadex.py` | MangaDex metadata, chapter list, image URLs, downloads |
+| `src/scrapers/weebcentral.py` | Browser extraction of image URLs and title |
+| `src/scrapers/webtoons.py` | Browser extraction of episode links/images and episode folder names |
+| `src/system_utils.py` | Dependency update command and credits |
+| `install_single.py` | Single-file builder and macOS/Linux command installation |
+| `scripts/bundle.py` | CLI wrapper around the module-preserving installation builder |
+| `scripts/release.py` | Version checks, release assets, isolated executable checks, checksums |
+| `test/` | Core, regression, standalone installation, and release tests |
 
-### Python Application
+Source routing matches parsed hostnames against known domains and their subdomains.
+MangaDex title URLs use the API. WeebCentral URLs download the images extracted from
+the requested page into a folder based on its chapter ID. Webtoons places episode
+folders under the sanitized series title and supplies the required Referer header.
+Other manga inputs use the generic direct-image hosts. Available mirrors are selected
+in configured priority order, with one URL per page filename.
 
-- **Python 3.13** - Core application with advanced async features
-- **asyncio** - Non-blocking concurrent operations
-- **aiohttp** - Async HTTP client with connection pooling
-- **playwright + playwright-stealth** - Browser automation for web scraping
-- **rich** - Terminal UI with progress bars and formatted output
-- **requests** - Synchronous HTTP for simple operations
+The downloader uses asyncio tasks, a worker semaphore, and aiohttp connection pools.
+Workers default to 10; the CLI accepts 1–100. HTTP failures use classified retry
+policies for rate limits, origin errors, retryable errors, and permanent errors.
+Default retry attempts are 5 and the default request timeout is 30 seconds. HEAD
+probes use a separate short timeout. Cancellation cleans up batch worker tasks before
+closing the session. Image writes use pending files followed by atomic replacement.
 
-### Development & Testing
+`download_all_pages()` returns a `DownloadResult` with `successful_pages`,
+`total_pages`, `completed_folders`, and a `complete` property. Successful counts include
+already-downloaded files. `completed_folders` is the contiguous completed prefix of
+the queue, not every independently completed folder. Use these results instead of
+assuming that queued pages were downloaded. MangaDex progress must not advance across
+an incomplete chapter. Automatic CBZ creation requires a completed batch and no stop signal.
 
-- **pytest** - Unit testing framework
-- **pytest-asyncio** - Async test support
-- **GitHub Actions** - CI/CD pipeline for automated testing
+CBZ updates merge older archive entries with new files into a temporary archive,
+then atomically replace the destination. They exclude other CBZ files, pending files,
+and symlinks. Source chapter folders are retained for recovery and resuming downloads;
+this increases disk usage. Do not restore the old truncate-and-delete implementation.
 
-## Architecture Deep Dive
-
-### Concurrency Model
-
-- **asyncio with semaphores** - Bounded concurrency for smoother progress updates
-- **aiohttp ClientSession** - Persistent connection pooling for optimized network performance
-- **asyncio.as_completed** - Incremental progress updates as tasks complete
-- **Maximum 10 concurrent downloads** - Configurable worker limit to prevent server overload
-
-### Data Sources & Resilience
-
-- **Multi-Source Architecture** - Automatic failover between manga hosting services
-- **MangaDx API Integration** - Primary source with UUID-based identification
-- **Web Scraping Fallback** - Playwright-based scraping for additional sources
-- **Pattern Matching** - Regex-based URL validation and image detection
-  - Pattern: `/manga/[^/]+/\d{4}-\d{3,4}\.png$`
-  - Title extraction: `/manga/([^/]+)/`
-
-### Error Handling & Rate Limiting
-
-- **RateLimiter class** - Exponential backoff to handle server constraints
-- **5 retry attempts** - Automatic retry with increasing delays
-- **Async timeout handling** - Graceful timeout management
-- **Signal handling** - Clean shutdown on SIGINT (Ctrl+C)
-
-### User Interface
-
-- **Rich Progress Bars** - Real-time visualization with:
-  - Spinner for active status
-  - Time elapsed/remaining
-  - Pages per second metrics
-  - Bar column for visual progress
-- **Clean Output Mode** - `--clean-output` flag suppresses progress bars and shows compact summary panel
-- **Colored Console Output** - Rich console with styled text and panels
-
-### Configuration Management
-
-- **JSON-based config** - Stored in `~/.config/manga_downloader/config.json`
-- **SQLite tracking DB** - Stored in `~/.config/manga_downloader/manga_collection.db`
-- **Default values** - Automatic creation if config doesn't exist
-- **User preferences** - Persistent settings across runs
-
-## Key Files & Structure
-
-```text
-mdl/
-├── main.py                 # Core CLI application (~415 lines)
-│   ├── Async download logic with bounded concurrency
-│   ├── RateLimiter class with exponential backoff
-│   ├── Config management (JSON)
-│   ├── Signal handlers for graceful shutdown
-│   ├── Progress tracking with Rich
-│   └── CBZ archive generation
-│
-├── test/
-│   └── test_main.py        # Comprehensive unit tests
-│       ├── Config creation/loading tests
-│       ├── URL sanitization tests
-│       ├── Download logic mocking
-│       └── Edge case handling
-│
-├── requirements.txt        # Python dependencies
-├── pytest.ini             # pytest configuration
-├── install.sh/install.bat # Installation scripts
-│
-├── .github/workflows/
-│   └── python-tests.yml   # CI/CD pipeline
-│
-└── Documentation
-    ├── README.md           # User-facing documentation
-    ├── ARCHITECTURE.md     # Technical architecture
-    ├── PROJECT_STRUCTURE.md # File organization
-    └── INSTALLATION.md     # Setup instructions
-```
-
-## Important Code Patterns
-
-### 1. Async Download with Semaphore
-
-```python
-# Bounded concurrency to prevent overwhelming servers
-semaphore = asyncio.Semaphore(workers)
-async with semaphore:
-    async with session.get(url) as response:
-        content = await response.read()
-```
-
-### 2. Progress Tracking
-
-```python
-# Rich progress bars with multiple columns
-progress = Progress(
-    SpinnerColumn(),
-    TextColumn("[progress.description]{task.description}"),
-    BarColumn(),
-    TimeElapsedColumn(),
-    TimeRemainingColumn(),
-)
-```
-
-### 3. Signal Handling
-
-```python
-# Graceful shutdown on interrupts
-stop_signal = False
-def signal_handler(sig, frame):
-    global stop_signal
-    stop_signal = True
-signal.signal(signal.SIGINT, signal_handler)
-```
-
-### 4. Configuration Management
-
-```python
-# JSON config in user home directory
-CONFIG_FILE = ~/.config/manga_downloader/config.json
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        create_default_config()
-    return json.load(open(CONFIG_FILE))
-```
-
-## Command-Line Interface
-
-### Main Arguments
-
-- `-M, --manga-name` - Manga title or MangaDx URL
-- `--workers` - Number of concurrent downloads (default: 10)
-- `--max-pages` - Limit pages to download
-- `--cbz` - Create CBZ archive format
-- `--clean-output` - Suppress progress bars, show summary panel
-- `--update` - Self-update from GitHub releases
-
-### Usage Examples
-
-```bash
-# Basic download
-python main.py -M "one-piece"
-
-# MangaDx URL
-python main.py -M "https://mangadx.org/title/uuid/manga-name"
-
-# Advanced with options
-python main.py -M "naruto" --workers 15 --max-pages 100 --cbz
-
-# Clean output mode (minimal UI)
-python main.py -M "naruto" --clean-output
-```
-
-## Testing Strategy
-
-### Unit Tests (pytest)
-
-- **Config management** - Creation, loading, defaults
-- **URL sanitization** - Illegal character removal
-- **Download mocking** - aiohttp response simulation
-- **Edge cases** - Invalid inputs, network failures
-- **Async testing** - pytest-asyncio for async functions
-
-### CI/CD Pipeline
-
-- **Automated testing** - Run on push/PR
-- **Python 3.13 compatibility** - Version-specific tests
-- **Optional releases** - Manual workflow dispatch
-
-## Technical Challenges Solved
-
-1. **Rate Limiting Management** - Exponential backoff prevents IP bans
-2. **Concurrent Download Optimization** - Semaphore-based worker limiting
-3. **Multi-Source Resilience** - Automatic failover between sources
-4. **Data Consistency** - UUID-based manga identification
-5. **Cross-Platform Compatibility** - pathlib for OS-agnostic paths
-6. **Memory Efficiency** - Streaming downloads with async I/O
-7. **Progress Visualization** - Non-blocking Rich updates
-
-## Performance Metrics
-
-- **Concurrency:** Up to 10 parallel async tasks
-- **Retry Logic:** 5 attempts with exponential backoff
-- **Progress Updates:** Real-time pages/second tracking
-- **Memory:** Streaming downloads prevent memory exhaustion
-- **Network:** Connection pooling with persistent sessions
-
-## Configuration Options
-
-Default config structure:
+Configuration is stored in `~/.config/manga_downloader/config.json`. Path lookup does
+not create directories during import. Missing configs are created when loaded;
+malformed JSON or invalid setting types/ranges fail with an explanatory error.
+Saves use a temporary file and atomic replacement. CLI help/version are parsed before
+configuration is loaded. The default configuration is:
 
 ```json
 {
   "manga_name": "",
+  "start_chapter": 1,
+  "start_page": 1,
+  "max_pages": 50,
   "workers": 10,
-  "max_pages": null,
-  "create_cbz": false,
-  "clean_output": false
+  "cbz": true,
+  "clean_output": false,
+  "md_language": "en",
+  "credits_shown": false
 }
 ```
 
-## Error Handling Patterns
+The SQLite database defaults to
+`~/.config/manga_downloader/manga_collection.db`; `MANGA_DB_PATH` overrides its path.
+Rows store manga name, last-checked time, latest local chapter, and latest recorded
+MangaDex chapter. Updates retain the highest recorded chapter values. Auto-update
+always probes the generic hosts, even when cached local/source chapter numbers match.
+See [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md) for operational details.
 
-1. **Network Errors** - Retry with exponential backoff
-2. **Rate Limits** - Automatic delay and retry
-3. **Invalid URLs** - UUID extraction and validation
-4. **Missing Config** - Auto-create with defaults
-5. **Interrupts** - Graceful shutdown with signal handlers
-6. **Timeouts** - Async timeout context managers
+Useful CLI examples (the long manga flag is `--manga`, not `--manga-name`):
 
-## Development Workflow
+```bash
+uv run python main.py --help
+uv run python main.py -M "one-piece" --workers 10 --max-retries 5 --timeout 30
+uv run python main.py -M "one-piece" --start-chapter 10 --max-pages 100
+uv run python main.py -M "one-piece" --no-cbz
+uv run python main.py -M "https://mangadex.org/title/<manga-uuid>" --md-lang en
+uv run python main.py --auto-update-db --dev
+uv run python main.py --clean-output --version
+```
 
-1. **Local Testing** - `pytest -v` runs comprehensive test suite
-2. **CI/CD** - GitHub Actions on push/PR
-3. **Releases** - Manual workflow dispatch for version releases
-4. **Updates** - Self-update mechanism via `--update` flag
+`--cbz` and `--no-cbz` override the configured archive preference. `--start-page` and
+`--max-pages` control generic page probing, not a universal limit across all sources.
+MangaDex accepts an explicit `--start-chapter`; without one its chapter iteration
+starts at zero. `--update` synchronizes locked project dependencies with uv; it does
+not download a new application release. Installed bundles instruct users to rebuild
+and reinstall when updating.
 
-## API Server Note
+Validation commands:
 
-The README references a Node.js API server (`Manga-API/`) with 5 RESTful endpoints, but this directory is not present in the current repository structure. The main application functions independently without the API server.
+```bash
+uv sync --locked
+uv run python -m pytest -q
+uv run ruff check main.py src scripts test install_single.py
+uv run ruff format --check main.py src scripts test install_single.py
+uv run python scripts/release.py --check-only
+uv run python scripts/release.py
+```
 
-## Dependencies
+The review's last completed validation had **82 passing tests**, including **37 added
+regression cases**. The original suite had 45 passing tests; the first 15 regression
+cases failed against the original code. Ruff lint, formatting, and `git diff --check`
+passed. Release assets were built in `/tmp/mdl-review-release`, with standalone
+help/version checks outside the checkout. These are recorded results, not a guarantee
+for later edits. Test coverage percentage has not been measured. Live manga sites
+were not tested during this review.
 
-### Production
+The single-file build embeds separate Python module namespaces. Do not concatenate
+modules or strip internal imports: aliased imports and module globals must remain
+independent. Runtime dependencies are installed separately. Release builds validate
+matching versions in `src/__init__.py` and `pyproject.toml`, include the versioned
+`release-notes/vX.Y.Z.md` as `RELEASE_NOTES.md`, produce checksums, and
+smoke-test the bundle. Matching `v` tags trigger publication; manual workflow runs,
+PRs, and main-branch pushes test/build without publishing.
 
-- `aiohttp` - Async HTTP client
-- `playwright` - Browser automation
-- `playwright-stealth` - Anti-detection for scraping
-- `requests` - Synchronous HTTP
-- `rich` - Terminal UI
+Known limitations to preserve in future reviews:
 
-### Development
+- Database rows lack source URLs, source IDs, and output locations. Generic-host
+  auto-update cannot reliably resume MangaDex, WeebCentral, or Webtoons downloads.
+  Rerun their original URLs. Reliable source-specific resume needs a schema migration
+  and a strategy for ambiguous existing rows.
+- Webtoons series discovery reads one rendered list page. Completeness across
+  paginated series is not established, and browser behavior needs live verification.
+- The helper named `download_image_streaming()` accumulates chunks in memory.
+  Do not describe it as bounded-memory disk streaming.
+- Adaptive host-cap bookkeeping exists but is not enforced by the download scheduler.
+  Do not claim adaptive concurrency is operational based only on that helper.
+- Existing downloaded files are counted as successes; the batch completion result
+  does not prove image content validity or that source discovery found every page.
 
-- `pytest` - Testing framework
-- `pytest-asyncio` - Async test support
+When editing, preserve asynchronous request handling, bounded worker concurrency,
+classified retry policies, cancellation cleanup, and module-local state. Avoid blocking
+the event loop with long filesystem or SQLite operations. Preserve archive/config
+atomic replacement and contiguous chapter tracking. Add regression tests for concrete
+behavioral bugs and run the checks appropriate to the change. Keep the documentation
+honest about tested behavior, remaining limitations, and source-specific flag handling.
 
-## When Working on This Project
-
-### Always Consider
-
-1. **Async/await patterns** - All I/O should be non-blocking
-2. **Semaphore limits** - Respect concurrent worker bounds
-3. **Error handling** - Add retry logic with backoff
-4. **Progress updates** - Keep Rich UI responsive
-5. **Config validation** - Check for required fields
-6. **Cross-platform** - Use pathlib, not string paths
-7. **Clean shutdown** - Handle signals gracefully
-
-### Common Tasks
-
-- **Add new source** - Extend URL pattern matching
-- **Modify concurrency** - Adjust semaphore limits
-- **Update UI** - Modify Rich progress components
-- **Add tests** - Use pytest with asyncio support
-- **Change config** - Update default_config dict
-
-### Code Style
-
-- Type hints where beneficial
-- Async functions for I/O operations
-- Rich console for user output
-- JSON for configuration
-- pytest for testing
-- Clear separation of concerns
-
-## Summary for AI
-
-This is a **production-ready Python CLI tool** that downloads manga using **async/await concurrency** with **intelligent rate limiting** and **multi-source failover**. The codebase demonstrates advanced Python patterns including asyncio, context managers, signal handling, and comprehensive error recovery. When modifying this project, maintain the async architecture, respect the semaphore-based concurrency model, and ensure all changes include appropriate error handling and user feedback via Rich console.
+Release preparation for v3.5.1 also restored the main-branch installer safeguard
+for broken command symlinks and its regression case. The release suite has 83 tests.
+Keep `uv.lock` committed and refresh its project version when bumping a release.
+The publication workflow uses the bundled patch notes as the GitHub release body.
