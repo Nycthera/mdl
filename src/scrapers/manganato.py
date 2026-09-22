@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -77,7 +76,7 @@ def is_manganato_url(url: str) -> bool:
     return any(host == d or host.endswith(f".{d}") for d in MANGANATO_DOMAINS)
 
 
-def _absolute(base: str, href: Optional[str]) -> Optional[str]:
+def _absolute(base: str, href: str | None) -> str | None:
     if not href:
         return None
     href = href.strip()
@@ -92,7 +91,7 @@ def _absolute(base: str, href: Optional[str]) -> Optional[str]:
 
 async def _fetch_html(session, url: str, *, max_retries: int = 4) -> str:
     """GET a page with the same classified-retry policy as image downloads."""
-    last_exc: Optional[BaseException] = None
+    last_exc: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
             async with session.get(url, timeout=DEFAULT_TIMEOUT) as resp:
@@ -104,7 +103,7 @@ async def _fetch_html(session, url: str, *, max_retries: int = 4) -> str:
                     await asyncio.sleep(compute_backoff(cls, attempt))
                     continue
                 return await resp.text()
-        except (asyncio.TimeoutError,) as e:
+        except TimeoutError as e:
             last_exc = e
             if attempt == max_retries:
                 raise RuntimeError(f"Timeout fetching {url}") from e
@@ -132,8 +131,8 @@ def _is_chapter_page(soup: BeautifulSoup) -> bool:
     )
 
 
-def _extract_chapter_images(soup: BeautifulSoup, page_url: str) -> List[str]:
-    images: List[str] = []
+def _extract_chapter_images(soup: BeautifulSoup, page_url: str) -> list[str]:
+    images: list[str] = []
     for img in soup.select(
         "#chapter-content img, .reading-detail img, .page_chapter img, .container-chapter-reader img"
     ):
@@ -144,7 +143,7 @@ def _extract_chapter_images(soup: BeautifulSoup, page_url: str) -> List[str]:
     return images
 
 
-def _extract_chapter_links(soup: BeautifulSoup, page_url: str) -> List[Tuple[str, str]]:
+def _extract_chapter_links(soup: BeautifulSoup, page_url: str) -> list[tuple[str, str]]:
     """Return [(chapter_url, chapter_label), ...] in oldest-first order."""
     selectors = (
         ".row-content-chapter li a",
@@ -153,7 +152,7 @@ def _extract_chapter_links(soup: BeautifulSoup, page_url: str) -> List[Tuple[str
         ".chapter-list .row a",
     )
     seen = set()
-    rows: List[Tuple[str, str]] = []
+    rows: list[tuple[str, str]] = []
     for selector in selectors:
         for anchor in soup.select(selector):
             href = anchor.get("href")
@@ -181,7 +180,7 @@ def _chapter_folder_name(label: str, url: str, idx: int) -> str:
 async def fetch_manganato_images(
     url: str,
     workers: int = 10,
-) -> Tuple[List[Tuple[str, str]], str]:
+) -> tuple[list[tuple[str, str]], str]:
     """Fetch image URLs from a Manganato/Mangakakalot-family URL.
 
     Returns (urls_to_download, title) where urls_to_download is a list of
@@ -200,7 +199,7 @@ async def fetch_manganato_images(
         )
 
     fallback_title = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").title()
-    urls_to_download: List[Tuple[str, str]] = []
+    urls_to_download: list[tuple[str, str]] = []
 
     async with build_session() as session:
         html = await _fetch_html(session, url)
@@ -228,7 +227,7 @@ async def fetch_manganato_images(
 
             sem = asyncio.Semaphore(max(1, workers))
 
-            async def _fetch_one(idx: int, chap_url: str, label: str) -> Tuple[int, str, List[str]]:
+            async def _fetch_one(idx: int, chap_url: str, label: str) -> tuple[int, str, list[str]]:
                 async with sem:
                     if stop_signal:
                         return idx, label, []
@@ -246,7 +245,7 @@ async def fetch_manganato_images(
                 for idx, (chap_url, label) in enumerate(chapters, start=1)
             ]
 
-            results: List[Tuple[int, str, List[str]]] = []
+            results: list[tuple[int, str, list[str]]] = []
             done = 0
             for coro in asyncio.as_completed(tasks):
                 idx, label, images = await coro

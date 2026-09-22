@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
@@ -62,7 +61,7 @@ def _is_chapter_path(url: str) -> bool:
 
 async def _fetch_html(session, url: str, *, max_retries: int = 4) -> str:
     """GET a page with the same classified-retry policy as image downloads."""
-    last_exc: Optional[BaseException] = None
+    last_exc: BaseException | None = None
     for attempt in range(1, max_retries + 1):
         try:
             async with session.get(url, timeout=DEFAULT_TIMEOUT) as resp:
@@ -74,7 +73,7 @@ async def _fetch_html(session, url: str, *, max_retries: int = 4) -> str:
                     await asyncio.sleep(compute_backoff(cls, attempt))
                     continue
                 return await resp.text()
-        except (asyncio.TimeoutError,) as e:
+        except TimeoutError as e:
             last_exc = e
             if attempt == max_retries:
                 raise RuntimeError(f"Timeout fetching {url}") from e
@@ -88,8 +87,8 @@ def _extract_title(soup: BeautifulSoup, fallback: str) -> str:
     return text or fallback
 
 
-def _extract_chapter_images(soup: BeautifulSoup) -> List[str]:
-    images: List[str] = []
+def _extract_chapter_images(soup: BeautifulSoup) -> list[str]:
+    images: list[str] = []
     for img in soup.select("picture img"):
         src = img.get("data-src") or img.get("src")
         if src and src not in images:
@@ -97,14 +96,14 @@ def _extract_chapter_images(soup: BeautifulSoup) -> List[str]:
     return images
 
 
-def _extract_chapter_number(text: str) -> Optional[str]:
+def _extract_chapter_number(text: str) -> str | None:
     m = _CHAPTER_NUM_RE.search(text)
     return m.group(1) if m else None
 
 
-def _extract_chapter_links(soup: BeautifulSoup) -> List[Tuple[str, str]]:
+def _extract_chapter_links(soup: BeautifulSoup) -> list[tuple[str, str]]:
     """Return [(chapter_url, chapter_label), ...] in oldest-first order."""
-    rows: List[Tuple[str, str]] = []
+    rows: list[tuple[str, str]] = []
     for link in soup.select("#chapters > div > a"):
         href = link.get("href")
         if not href:
@@ -132,7 +131,7 @@ def _chapter_folder_name(label: str, url: str, idx: int) -> str:
 async def fetch_mangapill_images(
     url: str,
     workers: int = 10,
-) -> Tuple[List[Tuple[str, str]], str]:
+) -> tuple[list[tuple[str, str]], str]:
     """Fetch image URLs from a MangaPill URL.
 
     Returns (urls_to_download, title) where urls_to_download is a list of
@@ -151,7 +150,7 @@ async def fetch_mangapill_images(
         )
 
     fallback_title = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").title()
-    urls_to_download: List[Tuple[str, str]] = []
+    urls_to_download: list[tuple[str, str]] = []
 
     async with build_session(headers={"Referer": BASE_URL + "/"}) as session:
         if _is_chapter_path(url):
@@ -180,7 +179,7 @@ async def fetch_mangapill_images(
 
             sem = asyncio.Semaphore(max(1, workers))
 
-            async def _fetch_one(idx: int, chap_url: str, label: str) -> Tuple[int, str, List[str]]:
+            async def _fetch_one(idx: int, chap_url: str, label: str) -> tuple[int, str, list[str]]:
                 async with sem:
                     if stop_signal:
                         return idx, label, []
@@ -198,7 +197,7 @@ async def fetch_mangapill_images(
                 for idx, (chap_url, label) in enumerate(chapters, start=1)
             ]
 
-            results: List[Tuple[int, str, List[str]]] = []
+            results: list[tuple[int, str, list[str]]] = []
             done = 0
             for coro in asyncio.as_completed(tasks):
                 idx, label, images = await coro
