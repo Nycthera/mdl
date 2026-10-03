@@ -38,6 +38,31 @@ def set_stop_signal(value: bool) -> None:
     stop_signal = value
 
 
+async def _find_chapter_source(
+    session: aiohttp.ClientSession,
+    manga_name: str,
+    chapter_label: str,
+    base_urls: list[str],
+) -> str | None:
+    """Return the first source that confirms a chapter, cancelling slower mirrors."""
+
+    async def check(base: str) -> str | None:
+        url = f"{base}{manga_name}/{chapter_label}-001.png"
+        return base if await url_exists(session, url) else None
+
+    check_tasks = [asyncio.create_task(check(base)) for base in base_urls]
+    try:
+        for check in asyncio.as_completed(check_tasks):
+            if source := await check:
+                return source
+        return None
+    finally:
+        for task in check_tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*check_tasks, return_exceptions=True)
+
+
 async def _chapter_exists(
     session: aiohttp.ClientSession,
     manga_name: str,
@@ -45,10 +70,7 @@ async def _chapter_exists(
     base_urls: list[str],
 ) -> bool:
     """Return whether a chapter has at least one page on any configured source."""
-    check_tasks = [
-        url_exists(session, f"{base}{manga_name}/{chapter_label}-001.png") for base in base_urls
-    ]
-    return any(await asyncio.gather(*check_tasks))
+    return await _find_chapter_source(session, manga_name, chapter_label, base_urls) is not None
 
 
 async def gather_all_urls(
@@ -71,6 +93,8 @@ async def gather_all_urls(
     connector = aiohttp.TCPConnector(
         limit=max(1, workers * 2),
         limit_per_host=max(1, workers),
+        keepalive_timeout=30,
+        ttl_dns_cache=300,
     )
     async with aiohttp.ClientSession(connector=connector) as session:
         chapter = start_chapter
@@ -79,47 +103,44 @@ async def gather_all_urls(
                 break
 
             chapter_str = f"{chapter:04d}"
-            found_any = await _chapter_exists(session, manga_name, chapter_str, BASE_URLS)
+            chapter_labels = [chapter_str]
+            chapter_labels.extend(f"{chapter_str}.{dec}" for dec in range(1, max_decimals + 1))
 
-            if found_any:
+            # A missing decimal used to cost one full network round trip each.
+            # Probe the integer and decimal variants together; the connector still
+            # bounds actual socket concurrency to the configured worker budget.
+            sources = await asyncio.gather(
+                *(
+                    _find_chapter_source(session, manga_name, label, BASE_URLS)
+                    for label in chapter_labels
+                )
+            )
+            found_chapters = [
+                (label, source)
+                for label, source in zip(chapter_labels, sources, strict=True)
+                if source is not None
+            ]
+
+            for found_label, source in found_chapters:
+                # The chapter probe already identified a responsive mirror. Try it
+                # first during page discovery rather than repeating failed probes
+                # against every configured source.
+                ordered_sources = [source, *(base for base in BASE_URLS if base != source)]
                 found_urls, chapter_folder = await _collect_chapter_urls_for_download(
                     manga_name,
-                    chapter_str,
+                    found_label,
                     start_page,
                     max_pages,
                     folder_base,
                     workers,
                     session,
-                    BASE_URLS,
+                    ordered_sources,
                 )
                 urls_to_download.extend((url, chapter_folder) for url in found_urls)
                 if not CLEAN_OUTPUT:
-                    console.print(f"[green]Chapter {chapter_str}: {len(found_urls)} pages found[/]")
+                    console.print(f"[green]Chapter {found_label}: {len(found_urls)} pages found[/]")
 
-            decimal_found_any = False
-            for dec in range(1, max_decimals + 1):
-                chapter_decimal_str = f"{chapter_str}.{dec}"
-                if not await _chapter_exists(session, manga_name, chapter_decimal_str, BASE_URLS):
-                    continue
-
-                decimal_found_any = True
-                found_urls, chapter_folder = await _collect_chapter_urls_for_download(
-                    manga_name,
-                    chapter_decimal_str,
-                    start_page,
-                    max_pages,
-                    folder_base,
-                    workers,
-                    session,
-                    BASE_URLS,
-                )
-                urls_to_download.extend((url, chapter_folder) for url in found_urls)
-                if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[green]Chapter {chapter_decimal_str}: {len(found_urls)} pages found[/]"
-                    )
-
-            if not found_any and not decimal_found_any:
+            if not found_chapters:
                 if not CLEAN_OUTPUT:
                     console.print(f"[red]Chapter {chapter_str} not found. Stopping.[/]")
                 break

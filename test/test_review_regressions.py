@@ -18,10 +18,12 @@ def test_archive_update_preserves_previous_chapters(tmp_path):
     chapter.mkdir(parents=True)
     (chapter / "001.png").write_bytes(b"first")
     archive = cbz.create_cbz_for_all(str(root))
+    assert not chapter.exists()
     chapter2 = root / "chapter_0002"
     chapter2.mkdir()
     (chapter2 / "001.png").write_bytes(b"second")
     cbz.create_cbz_for_all(str(root))
+    assert not chapter2.exists()
     with zipfile.ZipFile(archive) as stream:
         assert stream.read("chapter_0001/001.png") == b"first"
         assert stream.read("chapter_0002/001.png") == b"second"
@@ -40,6 +42,35 @@ def test_failed_archive_update_preserves_archive_and_sources(tmp_path, monkeypat
         cbz.create_cbz_for_all(str(root))
     assert open(archive, "rb").read() == original
     assert page.read_bytes() == b"replacement"
+
+
+def test_failed_archive_creation_keeps_image_folder(tmp_path, monkeypatch):
+    root = tmp_path / "Title"
+    chapter = root / "chapter_0001"
+    chapter.mkdir(parents=True)
+    page = chapter / "001.png"
+    page.write_bytes(b"page")
+    monkeypatch.setattr(zipfile.ZipFile, "write", MagicMock(side_effect=OSError("disk full")))
+
+    with pytest.raises(OSError):
+        cbz.create_cbz_for_all(str(root))
+
+    assert page.read_bytes() == b"page"
+    assert not (root / "Title.cbz").exists()
+
+
+def test_archive_keeps_folder_with_unarchived_files(tmp_path):
+    root = tmp_path / "Title"
+    chapter = root / "chapter_0001"
+    chapter.mkdir(parents=True)
+    (chapter / "001.png").write_bytes(b"page")
+    (chapter / ".pending_002.png").write_bytes(b"partial")
+
+    archive = cbz.create_cbz_for_all(str(root))
+
+    assert chapter.exists()
+    with zipfile.ZipFile(archive) as stream:
+        assert stream.namelist() == ["chapter_0001/001.png"]
 
 
 @pytest.mark.parametrize("name", ["..", ".", "///", "\x00", "CON"])
@@ -132,6 +163,21 @@ def test_cli_can_disable_default_archive(monkeypatch):
     assert parse_args().cbz is False
 
 
+@pytest.mark.parametrize(
+    ("arguments", "attribute", "expected"),
+    [
+        (["--verify", "Library"], "verify", "Library"),
+        (["--repair", "Library"], "repair", "Library"),
+        (["--download-history", "Title"], "download_history", "Title"),
+    ],
+)
+def test_cli_library_maintenance_flags(monkeypatch, arguments, attribute, expected):
+    from src.cli import parse_args
+
+    monkeypatch.setattr("sys.argv", ["mdl", *arguments])
+    assert getattr(parse_args(), attribute) == expected
+
+
 async def test_auto_update_checks_even_when_cached_numbers_match(monkeypatch):
     monkeypatch.setattr(main, "stop_signal", False)
     monkeypatch.setattr(main, "CLEAN_OUTPUT", True)
@@ -146,6 +192,82 @@ async def test_auto_update_checks_even_when_cached_numbers_match(monkeypatch):
     monkeypatch.setattr(main, "gather_all_urls", gather)
     await main._auto_update_from_db(2, 1, 50, False)
     gather.assert_awaited_once()
+
+
+async def test_auto_update_downloads_generic_chapters_with_generic_source(monkeypatch):
+    monkeypatch.setattr(main, "stop_signal", False)
+    monkeypatch.setattr(main, "CLEAN_OUTPUT", True)
+    monkeypatch.setattr(
+        main,
+        "get_tracked_manga",
+        lambda: [
+            {
+                "manga_name": "Aishiteru Game wo Owarasetai",
+                "latest_chapter_local": 66,
+                "source_type": "generic",
+                "source_url": None,
+                "source_id": None,
+                "output_path": "Manga/Aishiteru Game wo Owarasetai",
+            }
+        ],
+    )
+    pages = [("https://example.test/page.jpg", "Manga/Aishiteru Game wo Owarasetai/chapter_0067")]
+    monkeypatch.setattr(main, "gather_all_urls", AsyncMock(return_value=pages))
+    download = AsyncMock(return_value=MagicMock(complete=True))
+    monkeypatch.setattr(main, "download_all_pages", download)
+
+    await main._auto_update_from_db(2, 1, 50, False)
+
+    download.assert_awaited_once_with(
+        pages,
+        max_workers=2,
+        manga_name="Aishiteru Game wo Owarasetai",
+        max_retries=5,
+        source_type="generic",
+        source_url=None,
+        source_id=None,
+        output_path="Manga/Aishiteru Game wo Owarasetai",
+        optimize_mode="off",
+    )
+
+
+async def test_auto_update_routes_mangadex_from_saved_source(monkeypatch):
+    source_url = "https://mangadex.org/title/12345678-1234-1234-1234-123456789abc"
+    monkeypatch.setattr(main, "stop_signal", False)
+    monkeypatch.setattr(main, "CLEAN_OUTPUT", True)
+    monkeypatch.setattr(
+        main,
+        "get_tracked_manga",
+        lambda: [
+            {
+                "manga_name": "Title",
+                "latest_chapter_local": 7,
+                "latest_chapter_from_mangadex": 8,
+                "source_type": "mangadex",
+                "source_url": source_url,
+                "source_id": "12345678-1234-1234-1234-123456789abc",
+                "language": "ja",
+                "output_path": "Title",
+            }
+        ],
+    )
+    download = AsyncMock()
+    gather = AsyncMock()
+    monkeypatch.setattr(main, "download_md_chapters", download)
+    monkeypatch.setattr(main, "gather_all_urls", gather)
+
+    await main._auto_update_from_db(4, 1, 50, False, max_retries=3)
+
+    download.assert_awaited_once_with(
+        source_url,
+        lang="ja",
+        create_cbz=False,
+        max_workers=4,
+        max_retries=3,
+        start_chapter=7,
+        optimize_mode="off",
+    )
+    gather.assert_not_awaited()
 
 
 @pytest.mark.parametrize("source", ["webtoons", "weebcentral", "direct"])
@@ -223,6 +345,9 @@ async def test_mangadex_failed_chapter_does_not_advance_db(tmp_path, monkeypatch
     monkeypatch.setattr(mangadex, "create_cbz_for_all", archive)
     await mangadex.download_md_chapters(
         "https://mangadex.org/title/12345678-1234-1234-1234-123456789abc"
+    )
+    assert all(
+        call.kwargs["session"] is not None for call in mangadex.download_all_pages.await_args_list
     )
     record.assert_not_called()
     archive.assert_not_called()
@@ -329,3 +454,106 @@ async def test_cancelling_batch_cancels_download_workers(tmp_path, monkeypatch):
     with pytest.raises(asyncio.CancelledError):
         await task
     assert stopped.is_set()
+
+
+async def test_adaptive_host_limiter_enforces_reduced_cap():
+    import asyncio
+
+    from src.downloader import AdaptiveHostLimiter
+    from src.http import get_host_cap
+
+    url = "https://adaptive-limit.test/page.jpg"
+    cap = get_host_cap()
+    cap.set_baseline(4)
+    cap.record_failure(url, "rate_limit")
+    limiter = AdaptiveHostLimiter(4)
+    active = 0
+    peak = 0
+
+    async def worker():
+        nonlocal active, peak
+        async with limiter.slot(url):
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+
+    await asyncio.gather(*(worker() for _ in range(8)))
+    assert peak == 2
+
+
+async def test_downloader_records_page_failure_history(tmp_path, monkeypatch):
+    begin = MagicMock(return_value=42)
+    pages = MagicMock()
+    finish = MagicMock()
+    monkeypatch.setattr(downloader, "begin_download_run", begin)
+    monkeypatch.setattr(downloader, "record_page_results", pages)
+    monkeypatch.setattr(downloader, "finish_download_run", finish)
+    monkeypatch.setattr(downloader, "CLEAN_OUTPUT", True)
+    monkeypatch.setattr(
+        downloader,
+        "download_image",
+        AsyncMock(return_value="Failed to download 001.jpg after 2 attempts: HTTP 500"),
+    )
+
+    result = await downloader.download_all_pages(
+        [("https://cdn.test/001.jpg", str(tmp_path / "Title" / "chapter_1"))],
+        manga_name="Title",
+        track_to_db=False,
+        track_history=True,
+        source_type="mangadex",
+        source_id="source-id",
+        output_path=str(tmp_path / "Title"),
+    )
+
+    assert not result.complete
+    begin.assert_called_once()
+    recorded = pages.call_args.args[1][0]
+    assert recorded[3] == "failed"
+    finish.assert_called_once_with(
+        42,
+        successful_pages=0,
+        failed_pages=1,
+        interrupted=False,
+    )
+
+
+async def test_mangadex_prefetches_next_manifest_during_download(tmp_path, monkeypatch):
+    import asyncio
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(mangadex, "stop_signal", False)
+    monkeypatch.setattr(mangadex, "CLEAN_OUTPUT", True)
+    monkeypatch.setattr(mangadex, "get_manga_name_from_md", AsyncMock(return_value="Title"))
+    monkeypatch.setattr(
+        mangadex,
+        "fetch_all_chapters_md",
+        AsyncMock(
+            return_value=[
+                {"id": "one", "attributes": {"chapter": "1"}},
+                {"id": "two", "attributes": {"chapter": "2"}},
+            ]
+        ),
+    )
+    second_manifest_started = asyncio.Event()
+
+    async def get_images(chapter_id, **kwargs):
+        if chapter_id == "two":
+            second_manifest_started.set()
+        return [f"https://cdn.test/{chapter_id}.jpg"]
+
+    async def download_pages(urls, **kwargs):
+        if urls[0][0].endswith("one.jpg"):
+            await asyncio.wait_for(second_manifest_started.wait(), timeout=1)
+        return downloader.DownloadResult(1, 1, [urls[0][1]])
+
+    monkeypatch.setattr(mangadex, "get_images_md", get_images)
+    monkeypatch.setattr(mangadex, "download_all_pages", AsyncMock(side_effect=download_pages))
+    monkeypatch.setattr(mangadex, "record_download", MagicMock())
+
+    await mangadex.download_md_chapters(
+        "https://mangadex.org/title/12345678-1234-1234-1234-123456789abc",
+        create_cbz=False,
+    )
+
+    assert second_manifest_started.is_set()

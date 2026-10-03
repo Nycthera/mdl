@@ -243,6 +243,16 @@ class HostConcurrencyCap:
             cap = self._caps.get(host)
         return min(b, cap) if cap is not None else b
 
+    def set_baseline(self, baseline: int) -> None:
+        """Update the uncapped limit and clamp recovering hosts to it."""
+        baseline = max(1, int(baseline))
+        with self._lock:
+            self._baseline = baseline
+            for host, cap in list(self._caps.items()):
+                if cap >= baseline:
+                    self._caps.pop(host, None)
+                    self._streaks.pop(host, None)
+
     def record_failure(self, url: str, cls: str) -> None:
         """Multiplicative decrease on rate_limit; -1 on retryable; no-op otherwise."""
         host = self.host_of(url)

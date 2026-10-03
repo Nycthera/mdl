@@ -26,24 +26,23 @@
   - MangaDex official API (primary, most reliable)
   - WeebCentral browser automation fallback
   - Direct image hosting support (LaStation, Lowee, Planeptune)
-  
 - **⚡ Performance**
   - Async/await concurrency with configurable workers (1-50)
-  - Rate limiting with exponential backoff
+  - Adaptive per-host concurrency with exponential backoff
   - Connection pooling for optimized network usage
+  - MangaDex chapter-manifest prefetching
   - Pages/second performance metrics
-  
 - **📦 Output Formats**
   - CBZ (Comic Book Archive) generation
   - Organized folder structure per chapter
   - Clean JSON configuration management
-  
 - **🛡️ Reliability**
   - Automatic retry with exponential backoff
   - Graceful error handling
   - Support interruption handling (Ctrl+C)
   - Cross-platform compatibility (Windows, macOS, Linux)
-  
+  - Source-aware SQLite tracking with page-level download history
+  - Missing/corrupt image verification and URL-backed repair
 - **👁️ User Experience**
   - Real-time progress bars with ETA
   - Rich terminal UI with color output
@@ -135,6 +134,12 @@ uv run python main.py -M "naruto" --workers 20 --max-pages 150
 # Download with CBZ archive creation
 uv run python main.py -M "attack-on-titan" --cbz
 
+# Optimize each completed page while the next pages download, then create a CBZ
+uv run python main.py -M "attack-on-titan" --optimize-images
+
+# Choose an optimization mode
+uv run python main.py -M "attack-on-titan" --optimize-images small
+
 # Keep folders without creating an archive
 uv run python main.py -M "attack-on-titan" --no-cbz
 
@@ -169,6 +174,14 @@ uv run python main.py --auto-update-db
 # DB auto-update with developer debug logs
 uv run python main.py --auto-update-db --dev
 
+# Inspect recent download runs, optionally for one title
+uv run python main.py --download-history
+uv run python main.py --download-history "One Piece"
+
+# Check a library folder and repair pages using stored source URLs
+uv run python main.py --verify "One Piece"
+uv run python main.py --repair "One Piece"
+
 # Show credits and attribution
 uv run python main.py --credits
 
@@ -189,8 +202,17 @@ Detailed guide: [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md)
 ### Archive safety
 
 CBZ updates preserve chapters already in the existing archive and replace the archive
-only after the new file is written successfully. Source chapter folders are retained
-for resuming downloads. Incomplete download batches are not automatically packaged.
+only after the new file is written and checked. Archived image folders are then deleted.
+Folders with pending or excluded files are kept. Incomplete download batches are not
+automatically packaged. Use `--no-cbz` to keep the image folders.
+
+`--optimize-images` uses `balanced` by default. Choose `lossless` to recompress PNGs
+without changing their pixels, `balanced` for moderate JPEG/WebP quality and PNG
+palette reduction, or `small` for stronger compression. `off` disables optimization.
+The CLI keeps each page's original image format and filename, and replaces a page only
+when the result is smaller. JPEGs remain unchanged in lossless mode. Optimization runs
+in parallel with downloads; CBZ creation starts after both have finished. Pillow is
+installed with the project dependencies.
 
 ### Configuration
 
@@ -200,15 +222,15 @@ Example config:
 
 ```json
 {
-    "manga_name": "one-piece",
-    "start_chapter": 1,
-    "start_page": 1,
-    "max_pages": 50,
-    "workers": 10,
-    "cbz": true,
-    "clean_output": false,
-    "md_language": "en",
-    "credits_shown": true
+  "manga_name": "one-piece",
+  "start_chapter": 1,
+  "start_page": 1,
+  "max_pages": 50,
+  "workers": 10,
+  "cbz": true,
+  "clean_output": false,
+  "md_language": "en",
+  "credits_shown": true
 }
 ```
 
@@ -241,21 +263,21 @@ src/
 
 ### Performance Characteristics
 
-| Metric | Value | Notes |
-| -------- | ------- | ------- |
-| **Concurrency** | 1-50 workers | Configurable, default 10 |
-| **Rate Limiting** | 5 req/sec | Adaptive, respects server limits |
-| **Retry Logic** | 5 attempts | Exponential backoff (1s-32s) |
-| **CBZ Creation** | Streaming | Memory-efficient archive generation |
-| **Memory Usage** | ~50-100 MB | Depends on worker count |
+| Metric            | Value        | Notes                               |
+| ----------------- | ------------ | ----------------------------------- |
+| **Concurrency**   | 1-50 workers | Configurable, default 10            |
+| **Rate Limiting** | 5 req/sec    | Adaptive, respects server limits    |
+| **Retry Logic**   | 5 attempts   | Exponential backoff (1s-32s)        |
+| **CBZ Creation**  | Streaming    | Memory-efficient archive generation |
+| **Memory Usage**  | ~50-100 MB   | Depends on worker count             |
 
 ### Data Sources
 
-| Source | Priority | Speed | Reliability | Notes |
-| -------- | ---------- | ------- | -------------- | ------- |
-| MangaDex API | 1 | Fast | Very High | Official, rate-limited |
-| LaStation | 2 | Fast | High | Direct hosting |
-| WeebCentral | 3 | Slow | Medium | Browser automation |
+| Source       | Priority | Speed | Reliability | Notes                  |
+| ------------ | -------- | ----- | ----------- | ---------------------- |
+| MangaDex API | 1        | Fast  | Very High   | Official, rate-limited |
+| LaStation    | 2        | Fast  | High        | Direct hosting         |
+| WeebCentral  | 3        | Slow  | Medium      | Browser automation     |
 
 ## 📦 Dependencies
 
@@ -271,7 +293,7 @@ Runtime dependencies are declared in `pyproject.toml` and resolved exactly in
 
 ### Publishing a release
 
-Set matching versions in [src/__init__.py](src/__init__.py) and `pyproject.toml`,
+Set matching versions in [src/**init**.py](src/__init__.py) and `pyproject.toml`,
 run `uv lock`, and write `release-notes/vX.Y.Z.md`. Commit the changes and push
 the matching `v` tag. For example, after setting the version to `3.5.1`:
 

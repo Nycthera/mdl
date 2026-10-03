@@ -92,18 +92,50 @@ async def _collect_chapter_urls_for_download(
     session: aiohttp.ClientSession,
     base_urls: list[str],
 ) -> tuple[list[str], str]:
-    """Collect URLs for a single chapter."""
+    """Collect a contiguous chapter, preferring the first responsive mirror.
+
+    Direct-image chapters are contiguous. Probe the responsive source across the
+    requested range in one concurrent pass, then consult the remaining mirrors only
+    for the first gap. This avoids paying for every absent trailing page on every
+    mirror (the common case at the end of every chapter).
+    """
     chapter_folder = os.path.join(folder_base, f"chapter_{chapter_label}")
     os.makedirs(chapter_folder, exist_ok=True)
     urls = _build_chapter_urls(manga_name, chapter_label, start_page, max_pages, base_urls)
-    found_urls = await _collect_existing_urls(
-        urls, f"Checking Chapter {chapter_label}", workers, session
+    if not urls or not base_urls:
+        return [], chapter_folder
+
+    page_names = [f"{chapter_label}-{page:03d}.png" for page in range(start_page, max_pages + 1)]
+    primary_urls = [f"{base_urls[0]}{manga_name}/{page_name}" for page_name in page_names]
+    found_primary = await _collect_existing_urls(
+        primary_urls, f"Checking Chapter {chapter_label}", workers, session
     )
-    # Probe completion order is nondeterministic. Use source priority and select
-    # one mirror per filename so concurrent downloads cannot overwrite each other.
-    available = set(found_urls)
-    selected = {}
-    for url in urls:
-        if url in available:
-            selected.setdefault(url.rsplit("/", 1)[-1], url)
-    return list(selected.values()), chapter_folder
+    available_primary = set(found_primary)
+    selected: dict[str, str] = {
+        page_name: url
+        for page_name, url in zip(page_names, primary_urls, strict=True)
+        if url in available_primary
+    }
+
+    for page_name in page_names:
+        if page_name in selected:
+            continue
+
+        fallback_urls = [f"{base}{manga_name}/{page_name}" for base in base_urls[1:]]
+        found_fallbacks = set(
+            await _collect_existing_urls(
+                fallback_urls,
+                f"Checking Chapter {chapter_label} boundary",
+                workers,
+                session,
+            )
+        )
+        for url in fallback_urls:
+            if url in found_fallbacks:
+                selected[page_name] = url
+                break
+        else:
+            # The first page absent from every mirror marks the chapter boundary.
+            break
+
+    return [selected[name] for name in page_names if name in selected], chapter_folder
