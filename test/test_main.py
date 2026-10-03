@@ -17,12 +17,17 @@ import src.scrapers.mangadex as mangadex_mod
 import src.utils as utils_mod
 from src.cbz import create_cbz_for_all
 from src.database.manga_db import (
+    begin_download_run,
     ensure_schema,
+    finish_download_run,
+    get_download_history,
+    get_latest_page_records,
     get_tracked_manga,
     has_new_mangadex_release,
     infer_latest_chapter_from_folders,
     record_download,
     record_download_from_folders,
+    record_page_results,
 )
 from src.downloader import _get_trackable_chapter_folders, download_image
 
@@ -231,6 +236,119 @@ def test_record_download_insert_and_update(tmp_path: Path):
     assert rows_after[0][3] == 13
 
 
+def test_database_uses_wal_busy_timeout_and_schema_version(tmp_path: Path):
+    db_path = str(tmp_path / "tracking.db")
+    ensure_schema(db_path)
+
+    connection = manga_db_mod._connect(db_path)
+    try:
+        assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 10_000
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+    finally:
+        connection.close()
+
+
+def test_record_download_deduplicates_names_case_insensitively(tmp_path: Path):
+    db_path = str(tmp_path / "tracking.db")
+    record_download("  One Piece  ", 10, 11, db_path)
+    record_download("one piece", 12, 12, db_path)
+
+    assert get_tracked_manga(db_path) == [
+        {
+            "manga_name": "one piece",
+            "latest_chapter_local": 12.0,
+            "latest_chapter_from_mangadex": 12.0,
+            "source_type": "generic",
+            "source_url": None,
+            "source_id": None,
+            "language": None,
+            "output_path": None,
+        }
+    ]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_record_download_rejects_non_finite_chapters(tmp_path: Path, value: float):
+    with pytest.raises(ValueError, match="finite number"):
+        record_download("Title", value, 1, str(tmp_path / "tracking.db"))
+
+
+def test_database_handles_concurrent_writers(tmp_path: Path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    db_path = str(tmp_path / "tracking.db")
+    ensure_schema(db_path)
+
+    def save(index: int) -> None:
+        record_download(f"Title {index}", index, index, db_path)
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(save, range(20)))
+
+    assert len(get_tracked_manga(db_path)) == 20
+
+
+def test_database_tracks_same_title_from_multiple_sources(tmp_path: Path):
+    db_path = str(tmp_path / "tracking.db")
+    record_download(
+        "Shared Title",
+        3,
+        4,
+        db_path,
+        source_type="mangadex",
+        source_id="md-id",
+        source_url="https://mangadex.org/title/md-id/name#fragment",
+        language="en",
+        output_path=str(tmp_path / "Shared Title"),
+    )
+    record_download(
+        "Shared Title",
+        2,
+        2,
+        db_path,
+        source_type="webtoons",
+        source_id="wt-id",
+        source_url="https://www.webtoons.com/series?title_no=wt-id",
+    )
+
+    tracked = get_tracked_manga(db_path)
+    assert len(tracked) == 2
+    assert {row["source_type"] for row in tracked} == {"mangadex", "webtoons"}
+    mangadex = next(row for row in tracked if row["source_type"] == "mangadex")
+    assert mangadex["source_id"] == "md-id"
+    assert mangadex["source_url"] == "https://mangadex.org/title/md-id/name"
+    assert mangadex["language"] == "en"
+
+
+def test_download_run_and_page_history(tmp_path: Path):
+    db_path = str(tmp_path / "tracking.db")
+    output = tmp_path / "Title"
+    page = output / "chapter_1" / "001.png"
+    run_id = begin_download_run("Title", 2, db_path, output_path=str(output))
+    record_page_results(
+        run_id,
+        [
+            ("https://cdn/001.png", str(page.parent), str(page), "saved", "ok"),
+            (
+                "https://cdn/002.png",
+                str(page.parent),
+                str(page.with_name("002.png")),
+                "failed",
+                "HTTP 500",
+            ),
+        ],
+        db_path,
+    )
+    finish_download_run(run_id, successful_pages=1, failed_pages=1, db_path=db_path)
+
+    history = get_download_history("title", db_path)
+    assert history[0]["status"] == "partial"
+    assert history[0]["successful_pages"] == 1
+    pages = get_latest_page_records(str(output), db_path)
+    assert [row["status"] for row in pages] == ["saved", "failed"]
+
+
 def test_default_db_path_expands_user_and_env(monkeypatch, tmp_path: Path):
     db_dir = tmp_path / "db-home"
     db_dir.mkdir()
@@ -264,6 +382,7 @@ def test_ensure_schema_migrates_legacy_table_and_dedupes(tmp_path: Path):
                 (1, "Solo Leveling", 100, 7.0, 7.0),
                 (2, "Solo Leveling", 200, 7.5, 7.5),
                 (3, "Dandadan", 150, 3.0, 3.0),
+                (4, " solo leveling ", 250, 8.0, 9.0),
             ],
         )
         connection.commit()
@@ -283,7 +402,7 @@ def test_ensure_schema_migrates_legacy_table_and_dedupes(tmp_path: Path):
     assert "date_last_chcked" not in columns
     assert rows == [
         ("Dandadan", 150, 3),
-        ("Solo Leveling", 200, 7.5),
+        ("Solo Leveling", 250, 8),
     ]
 
 
@@ -422,3 +541,110 @@ async def test_gather_all_urls_probes_decimal_chapters_after_integer(monkeypatch
         ("https://example/0007-001.png", "Series/chapter_0007"),
         ("https://example/0007.5-001.png", "Series/chapter_0007.5"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_gather_all_urls_probes_chapter_variants_concurrently(monkeypatch):
+    import asyncio
+
+    class DummyClientSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    all_started = asyncio.Event()
+    release = asyncio.Event()
+    started = 0
+
+    async def fake_url_exists(session, url):
+        nonlocal started
+        started += 1
+        if started == 6:
+            all_started.set()
+        await release.wait()
+        return False
+
+    monkeypatch.setattr(generic_mod.aiohttp, "ClientSession", DummyClientSession)
+    monkeypatch.setattr(generic_mod, "url_exists", fake_url_exists)
+    monkeypatch.setattr(generic_mod, "BASE_URLS", ["https://example/"])
+    monkeypatch.setattr(generic_mod, "stop_signal", False)
+
+    gather_task = asyncio.create_task(
+        generic_mod.gather_all_urls("series", max_decimals=5, workers=1)
+    )
+    await asyncio.wait_for(all_started.wait(), timeout=1)
+    release.set()
+
+    assert await gather_task == []
+
+
+@pytest.mark.asyncio
+async def test_chapter_probe_returns_after_first_available_mirror(monkeypatch):
+    import asyncio
+
+    both_started = asyncio.Event()
+    release_available = asyncio.Event()
+    cancelled = asyncio.Event()
+    started = 0
+
+    async def fake_url_exists(session, url):
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        if url.startswith("https://available/"):
+            await both_started.wait()
+            await release_available.wait()
+            return True
+        try:
+            await asyncio.Future()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(generic_mod, "url_exists", fake_url_exists)
+    probe = asyncio.create_task(
+        generic_mod._chapter_exists(
+            object(), "series", "0001", ["https://available/", "https://slow/"]
+        )
+    )
+    await asyncio.wait_for(both_started.wait(), timeout=1)
+    release_available.set()
+
+    assert await asyncio.wait_for(probe, timeout=1) is True
+    assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_direct_discovery_uses_responsive_source_and_stops_at_first_gap(
+    tmp_path, monkeypatch
+):
+    import src.scrapers as scrapers
+
+    checked = []
+
+    async def fake_url_exists(session, url):
+        checked.append(url)
+        return url.startswith("https://fast/") and url.endswith(("-001.png", "-002.png"))
+
+    monkeypatch.setattr(scrapers, "url_exists", fake_url_exists)
+    urls, _ = await scrapers._collect_chapter_urls_for_download(
+        "series",
+        "0001",
+        1,
+        50,
+        str(tmp_path),
+        10,
+        object(),
+        ["https://fast/", "https://slow-a/", "https://slow-b/"],
+    )
+
+    assert urls == [
+        "https://fast/series/0001-001.png",
+        "https://fast/series/0001-002.png",
+    ]
+    assert len(checked) == 52  # 50 primary probes + two mirrors for the boundary only

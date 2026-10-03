@@ -1,6 +1,6 @@
 # DB Auto-Update Guide
 
-This guide explains how to use the database-backed update workflow.
+This guide explains how to use the source-aware database-backed update workflow.
 
 ## What It Does
 
@@ -19,6 +19,25 @@ For each tracked row in `manga_data`, MDL:
 3. Scans for available pages from that point onward
 4. Downloads only missing files
 5. Updates DB metadata (`date_last_checked`, latest chapters)
+
+New downloads store their source type, original URL, source ID, language, and output
+folder. Auto-update routes MangaDex, WeebCentral, and Webtoons records back through
+their matching scraper. Migrated legacy rows remain `generic` because their original
+source cannot be recovered safely.
+
+Each run also records page-level outcomes. Inspect them with:
+
+```bash
+uv run python main.py --download-history
+uv run python main.py --download-history "One Piece"
+```
+
+Verify or repair a library folder with:
+
+```bash
+uv run python main.py --verify "One Piece"
+uv run python main.py --repair "One Piece"
+```
 
 ## Database Path
 
@@ -95,9 +114,12 @@ MANGA_DB_VERBOSE=1 uv run python main.py --auto-update-db
 
 ## Notes
 
-- The current schema tracks manga by `manga_name` only, without source URLs or IDs.
-- Auto-update probes the generic direct-image hosts, including when cached chapter
-  numbers match. It cannot reliably resume MangaDex or browser-source titles from
-  this schema; rerun their original source URL to check for updates.
+- The database uses WAL mode so update reads do not block completed-download writes.
+  Writers wait up to 10 seconds for a busy database instead of failing immediately.
+- Schema migrations are transactional and versioned. Manga names are trimmed and
+  matched case-insensitively, preventing duplicate rows such as `One Piece` and
+  `one piece` while retaining the highest recorded chapter values.
+- Legacy records without source metadata continue using generic direct-image probing.
+- Browser-source updates are limited by what each scraper can discover from its saved URL.
 - For best accuracy, keep names consistent with download folder naming.
-- MangaDex flow performs one consolidated DB write at the end of the manga run.
+- MangaDex records page history per chapter and consolidates chapter progress at the end.

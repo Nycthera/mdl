@@ -243,6 +243,7 @@ async def download_md_chapters(
     max_workers: int = 10,
     max_retries: int = 5,
     start_chapter: int = 0,
+    optimize_mode: str = "off",
 ) -> None:
     """Download all chapters from a MangaDex manga.
 
@@ -284,59 +285,94 @@ async def download_md_chapters(
         latest_chapter_from_mangadex = 0.0
 
         all_complete = True
+        selected_chapters: list[tuple[dict[str, Any], re.Match[str] | None, float | None]] = []
         for chapter in chapters:
-            if stop_signal:
-                all_complete = False
-                break
             attr = chapter.get("attributes", {})
             chapter_num = attr.get("chapter", "Unknown")
-            chapter_title = attr.get("title", "")
-            chap_id = chapter.get("id")
             chapter_match = re.search(r"(\d+(?:\.\d+)?)", str(chapter_num))
+            chapter_val = None
             if chapter_match:
                 chapter_val = float(chapter_match.group(1))
                 latest_chapter_from_mangadex = max(latest_chapter_from_mangadex, chapter_val)
-
             if chapter_match and chapter_val < start_chapter:
                 continue
+            selected_chapters.append((chapter, chapter_match, chapter_val))
 
-            # Subfolder per chapter
-            chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
-            chapter_folder_name = sanitize_folder_name(chapter_folder_name)
-            chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
-
-            images = await get_images_md(
-                chap_id, use_saver=use_saver, session=session, max_retries=max_retries
-            )
-            if not images:
-                all_complete = False
-                if not CLEAN_OUTPUT:
-                    console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
-                continue
-
-            os.makedirs(chapter_folder, exist_ok=True)
-            if not CLEAN_OUTPUT:
-                console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
-
-            urls_to_download = [(url, chapter_folder) for url in images]
-            result = await download_all_pages(
-                urls_to_download,
-                max_workers=max_workers,
-                manga_name=manga_name_clean,
-                track_to_db=False,
+        async def fetch_chapter_images(chapter: dict[str, Any]) -> list[str]:
+            return await get_images_md(
+                chapter.get("id"),
+                use_saver=use_saver,
+                session=session,
                 max_retries=max_retries,
             )
 
-            total_pages_downloaded += result.successful_pages
-            total_chapters_downloaded += int(result.complete)
-            all_complete = all_complete and result.complete
-            if chapter_match and all_complete and not stop_signal:
-                latest_chapter_local = max(latest_chapter_local, chapter_val)
+        prefetch_task = (
+            asyncio.create_task(fetch_chapter_images(selected_chapters[0][0]))
+            if selected_chapters
+            else None
+        )
+        try:
+            for index, (chapter, chapter_match, chapter_val) in enumerate(selected_chapters):
+                if stop_signal:
+                    all_complete = False
+                    break
+                attr = chapter.get("attributes", {})
+                chapter_num = attr.get("chapter", "Unknown")
+                chapter_title = attr.get("title", "")
 
-            if not os.listdir(chapter_folder):
+                images = await prefetch_task
+                prefetch_task = (
+                    asyncio.create_task(fetch_chapter_images(selected_chapters[index + 1][0]))
+                    if index + 1 < len(selected_chapters)
+                    else None
+                )
+
+                if not images:
+                    all_complete = False
+                    if not CLEAN_OUTPUT:
+                        console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
+                    continue
+
+                # Subfolder per chapter
+                chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
+                chapter_folder_name = sanitize_folder_name(chapter_folder_name)
+                chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
+
                 if not CLEAN_OUTPUT:
-                    console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
-                os.rmdir(chapter_folder)
+                    console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
+
+                os.makedirs(chapter_folder, exist_ok=True)
+                urls_to_download = [(url, chapter_folder) for url in images]
+                result = await download_all_pages(
+                    urls_to_download,
+                    max_workers=max_workers,
+                    manga_name=manga_name_clean,
+                    track_to_db=False,
+                    max_retries=max_retries,
+                    session=session,
+                    source_type="mangadex",
+                    source_url=manga_url,
+                    source_id=manga_uuid,
+                    language=lang,
+                    output_path=manga_root_folder,
+                    track_history=True,
+                    optimize_mode=optimize_mode,
+                )
+
+                total_pages_downloaded += result.successful_pages
+                total_chapters_downloaded += int(result.complete)
+                all_complete = all_complete and result.complete
+                if chapter_match and chapter_val is not None and all_complete and not stop_signal:
+                    latest_chapter_local = max(latest_chapter_local, chapter_val)
+
+                if not os.listdir(chapter_folder):
+                    if not CLEAN_OUTPUT:
+                        console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
+                    os.rmdir(chapter_folder)
+        finally:
+            if prefetch_task is not None and not prefetch_task.done():
+                prefetch_task.cancel()
+                await asyncio.gather(prefetch_task, return_exceptions=True)
 
         # Create CBZ from the manga root folder.
         # Archive file operations are synchronous — run them in a thread so
@@ -365,4 +401,9 @@ async def download_md_chapters(
                 manga_name=manga_name_clean,
                 latest_chapter_local=latest_chapter_local,
                 latest_chapter_from_mangadex=latest_chapter_from_mangadex,
+                source_type="mangadex",
+                source_url=manga_url,
+                source_id=manga_uuid,
+                language=lang,
+                output_path=manga_root_folder,
             )

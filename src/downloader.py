@@ -15,6 +15,7 @@ import asyncio
 import os
 import sqlite3
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 import aiohttp
@@ -28,7 +29,12 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-from src.database.manga_db import record_download_from_folders
+from src.database.manga_db import (
+    begin_download_run,
+    finish_download_run,
+    record_download_from_folders,
+    record_page_results,
+)
 from src.http import (
     HEAD_TIMEOUT,
     classify_failure,
@@ -252,13 +258,15 @@ def _build_connector(max_workers: int) -> aiohttp.TCPConnector:
 
     - limit = max_workers * 2 (ceiling 64 to avoid socket exhaustion)
     - limit_per_host = max_workers (so one host can't starve others)
-    - keepalive enabled, ttl=30s, cleanup_closed=True
+    - keepalive enabled for 30s with a 5-minute DNS cache
     """
     limit = max(8, min(64, max_workers * 2))
     limit_per_host = max(1, min(limit, max_workers))
     return aiohttp.TCPConnector(
         limit=limit,
         limit_per_host=limit_per_host,
+        keepalive_timeout=30,
+        ttl_dns_cache=300,
         force_close=False,
     )
 
@@ -274,6 +282,70 @@ class DownloadResult:
         return self.successful_pages == self.total_pages
 
 
+class AdaptiveHostLimiter:
+    """Async gate that enforces the live per-host AIMD concurrency cap."""
+
+    def __init__(self, base_limit: int):
+        self._base_limit = max(1, int(base_limit))
+        self._active: dict[str, int] = defaultdict(int)
+        self._condition = asyncio.Condition()
+        self._caps = get_host_cap()
+
+    @asynccontextmanager
+    async def slot(self, url: str):
+        host = self._caps.host_of(url)
+        async with self._condition:
+            while self._active[host] >= self._caps.effective(url, self._base_limit):
+                await self._condition.wait()
+            self._active[host] += 1
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._active[host] -= 1
+                self._condition.notify_all()
+
+
+def _history_status(result: str) -> str:
+    lowered = result.lower()
+    if "already downloaded" in lowered:
+        return "existing"
+    if "interrupted" in lowered:
+        return "interrupted"
+    if _download_failed(result):
+        return "failed"
+    return "saved"
+
+
+async def _persist_run_history(
+    run_id: int,
+    page_results: dict[tuple[str, str], str],
+    total_pages: int,
+    *,
+    interrupted: bool,
+) -> None:
+    """Persist collected page outcomes and close a durable run."""
+    successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    history_rows = [
+        (
+            url,
+            folder,
+            os.path.join(folder, image_filename(url)),
+            _history_status(result),
+            result,
+        )
+        for (url, folder), result in page_results.items()
+    ]
+    await asyncio.to_thread(record_page_results, run_id, history_rows)
+    await asyncio.to_thread(
+        finish_download_run,
+        run_id,
+        successful_pages=successful_pages,
+        failed_pages=total_pages - successful_pages,
+        interrupted=interrupted,
+    )
+
+
 async def download_all_pages(
     urls_to_download: list[tuple[str, str]],
     max_workers: int = 10,
@@ -281,12 +353,29 @@ async def download_all_pages(
     track_to_db: bool = True,
     max_retries: int = 5,
     referer: str | None = None,
+    session: aiohttp.ClientSession | None = None,
+    source_type: str = "generic",
+    source_url: str | None = None,
+    source_id: str | None = None,
+    language: str | None = None,
+    output_path: str | None = None,
+    track_history: bool | None = None,
+    optimize_mode: str = "off",
 ) -> DownloadResult:
     """Download all pages with progress tracking.
 
     Set track_to_db=False when the caller will handle a single consolidated DB write.
     Set referer=... for sources with anti-hotlink protection (e.g. Webtoons).
+    Pass a session to reuse an existing connection pool across chapter batches.
     """
+    if optimize_mode not in {"off", "lossless", "balanced", "small"}:
+        raise ValueError(f"Unknown image optimization mode: {optimize_mode}")
+    optimize_page = None
+    if optimize_mode != "off":
+        from src.image_optimizer import optimize_image
+
+        optimize_page = optimize_image
+
     urls_to_download = list(dict.fromkeys(urls_to_download))
     total_pages = len(urls_to_download)
     if total_pages == 0:
@@ -296,26 +385,66 @@ async def download_all_pages(
     for _, folder in urls_to_download:
         os.makedirs(folder, exist_ok=True)
 
-    # Tune the AIMD baseline to match the requested worker count so per-host
-    # caps scale with the user's --workers setting.
-    host_cap = get_host_cap()
-    host_cap._baseline = max(1, max_workers)  # noqa: SLF001 — intentional internal access
+    if output_path is None:
+        folders = [os.path.abspath(folder) for _, folder in urls_to_download]
+        output_path = os.path.commonpath(folders)
+        if len(set(folders)) == 1:
+            output_path = os.path.dirname(output_path)
 
-    connector = _build_connector(max_workers)
-    async with aiohttp.ClientSession(connector=connector) as session:
+    # Tune the AIMD baseline to match the requested worker count and enforce
+    # its changing per-host limits in the live scheduler.
+    host_cap = get_host_cap()
+    host_cap.set_baseline(max_workers)
+    host_limiter = AdaptiveHostLimiter(max_workers)
+
+    should_track_history = track_to_db if track_history is None else track_history
+    run_id: int | None = None
+    if should_track_history:
+        try:
+            run_id = await asyncio.to_thread(
+                begin_download_run,
+                manga_name,
+                total_pages,
+                source_type=source_type,
+                source_url=source_url,
+                source_id=source_id,
+                language=language,
+                output_path=output_path,
+            )
+        except (sqlite3.Error, OSError, ValueError):
+            run_id = None
+
+    owns_session = session is None
+    if session is None:
+        connector = _build_connector(max_workers)
+        session = aiohttp.ClientSession(connector=connector)
+
+    page_results: dict[tuple[str, str], str] = {}
+    try:
         sem = asyncio.Semaphore(max(1, max_workers))
-        page_results: dict[tuple[str, str], str] = {}
+        optimize_sem = asyncio.Semaphore(max(1, min(4, os.cpu_count() or 1)))
 
         async def download_worker(args: tuple[str, str]) -> tuple[tuple[str, str], str]:
-            async with sem:
-                url, folder = args
-                return args, await download_image(
-                    url,
-                    folder,
-                    session=session,
-                    max_retries=max_retries,
-                    referer=referer,
-                )
+            url, folder = args
+            async with host_limiter.slot(url):
+                async with sem:
+                    result = await download_image(
+                        url,
+                        folder,
+                        session=session,
+                        max_retries=max_retries,
+                        referer=referer,
+                    )
+            # Network slots are released before encoding; the next pages can
+            # download while a bounded number of completed pages are optimized.
+            if optimize_page is not None and "saved as" in result.lower():
+                async with optimize_sem:
+                    await asyncio.to_thread(
+                        optimize_page,
+                        os.path.join(folder, image_filename(url)),
+                        optimize_mode,
+                    )
+            return args, result
 
         tasks = [asyncio.create_task(download_worker(item)) for item in urls_to_download]
 
@@ -359,6 +488,23 @@ async def download_all_pages(
 
         finally:
             await _cancel_pending_tasks(tasks)
+    except asyncio.CancelledError:
+        if run_id is not None:
+            try:
+                await asyncio.shield(
+                    _persist_run_history(
+                        run_id,
+                        page_results,
+                        total_pages,
+                        interrupted=True,
+                    )
+                )
+            except (sqlite3.Error, OSError):
+                pass
+        raise
+    finally:
+        if owns_session:
+            await session.close()
 
     if track_to_db and not stop_signal and urls_to_download:
         try:
@@ -374,6 +520,11 @@ async def download_all_pages(
                     record_download_from_folders,
                     manga_name=manga_name,
                     chapter_folders=chapter_folders,
+                    source_type=source_type,
+                    source_url=source_url,
+                    source_id=source_id,
+                    language=language,
+                    output_path=output_path,
                 )
             elif DEV_MODE and not CLEAN_OUTPUT:
                 console.print(
@@ -394,6 +545,17 @@ async def download_all_pages(
             f"[bold blue][db][/bold blue] Skipping save for '{manga_name}' because no pages were queued"
         )
 
-    completed_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
     successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    if run_id is not None:
+        try:
+            await _persist_run_history(
+                run_id,
+                page_results,
+                total_pages,
+                interrupted=stop_signal,
+            )
+        except (sqlite3.Error, OSError):
+            pass
+
+    completed_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
     return DownloadResult(successful_pages, total_pages, completed_folders)

@@ -64,6 +64,16 @@ def parse_args():
     )
     parser.add_argument("--cbz", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument(
+        "--optimize-images",
+        nargs="?",
+        const="balanced",
+        default="off",
+        choices=("off", "lossless", "balanced", "small"),
+        metavar="MODE",
+        help="Optimize pages as they download: lossless, balanced (default when set), "
+        "small, or off. Runs alongside downloads before CBZ creation.",
+    )
+    parser.add_argument(
         "--clean-output",
         action="store_true",
         help="Minimal output: no banner, no progress bars",
@@ -83,6 +93,24 @@ def parse_args():
         "--auto-update-db",
         action="store_true",
         help="Check all tracked manga in the database and download new chapters",
+    )
+    parser.add_argument(
+        "--download-history",
+        nargs="?",
+        const="",
+        metavar="TITLE",
+        help="Show recent download runs, optionally filtered by manga title",
+    )
+    integrity = parser.add_mutually_exclusive_group()
+    integrity.add_argument(
+        "--verify",
+        metavar="PATH",
+        help="Check downloaded images and report missing or corrupt pages",
+    )
+    integrity.add_argument(
+        "--repair",
+        metavar="PATH",
+        help="Verify and redownload damaged pages using stored page history",
     )
     parser.add_argument(
         "--dev",

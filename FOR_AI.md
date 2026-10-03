@@ -23,7 +23,8 @@ needed for browser sources and can be installed with `uv run playwright install 
 | `src/rate_limiter.py` | Async API request throttling |
 | `src/cbz.py` | Atomic archive updates that preserve existing entries and source folders |
 | `src/utils.py` | Title/filename sanitization, slug handling, cancellation helpers |
-| `src/database/manga_db.py` | SQLite schema, legacy migration, chapter tracking |
+| `src/database/manga_db.py` | Source-aware SQLite library, run/page history, migrations |
+| `src/verification.py` | Dependency-free image integrity checks and history-backed repair |
 | `src/scrapers/__init__.py` | Direct-host page probing and mirror selection |
 | `src/scrapers/generic.py` | Integer/decimal chapter discovery on direct image hosts |
 | `src/scrapers/mangadex.py` | MangaDex metadata, chapter list, image URLs, downloads |
@@ -39,8 +40,9 @@ Source routing matches parsed hostnames against known domains and their subdomai
 MangaDex title URLs use the API. WeebCentral URLs download the images extracted from
 the requested page into a folder based on its chapter ID. Webtoons places episode
 folders under the sanitized series title and supplies the required Referer header.
-Other manga inputs use the generic direct-image hosts. Available mirrors are selected
-in configured priority order, with one URL per page filename.
+Other manga inputs use the generic direct-image hosts. Discovery starts with the first
+mirror that confirms a chapter, falls back to the other mirrors at page gaps, and keeps
+one URL per page filename.
 
 The downloader uses asyncio tasks, a worker semaphore, and aiohttp connection pools.
 Workers default to 10; the CLI accepts 1–100. HTTP failures use classified retry
@@ -84,8 +86,10 @@ configuration is loaded. The default configuration is:
 The SQLite database defaults to
 `~/.config/manga_downloader/manga_collection.db`; `MANGA_DB_PATH` overrides its path.
 Rows store manga name, last-checked time, latest local chapter, and latest recorded
-MangaDex chapter. Updates retain the highest recorded chapter values. Auto-update
-always probes the generic hosts, even when cached local/source chapter numbers match.
+MangaDex chapter. The database uses WAL mode, a 10-second busy timeout, transactional
+versioned migrations, and case-insensitive `(source_type, source_key)` identities.
+Updates retain the highest recorded chapter values. Auto-update routes source-aware
+rows through their scraper and uses generic probing for migrated legacy rows.
 See [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md) for operational details.
 
 Useful CLI examples (the long manga flag is `--manga`, not `--manga-name`):
@@ -136,16 +140,15 @@ PRs, and main-branch pushes test/build without publishing.
 
 Known limitations to preserve in future reviews:
 
-- Database rows lack source URLs, source IDs, and output locations. Generic-host
-  auto-update cannot reliably resume MangaDex, WeebCentral, or Webtoons downloads.
-  Rerun their original URLs. Reliable source-specific resume needs a schema migration
-  and a strategy for ambiguous existing rows.
+- Schema v3 stores source identity, output locations, run summaries, and page outcomes.
+  Migrated legacy rows remain generic because their original sources are unknowable.
+- `--verify` performs dependency-free image signature checks, not full pixel decoding.
+  `--repair` can only redownload pages that have a URL in page history.
 - Webtoons series discovery reads one rendered list page. Completeness across
   paginated series is not established, and browser behavior needs live verification.
 - The helper named `download_image_streaming()` accumulates chunks in memory.
   Do not describe it as bounded-memory disk streaming.
-- Adaptive host-cap bookkeeping exists but is not enforced by the download scheduler.
-  Do not claim adaptive concurrency is operational based only on that helper.
+- Adaptive host caps are enforced by `AdaptiveHostLimiter` in the download scheduler.
 - Existing downloaded files are counted as successes; the batch completion result
   does not prove image content validity or that source discovery found every page.
 
