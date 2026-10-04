@@ -557,7 +557,7 @@ def get_tracked_manga(
         cursor = connection.cursor()
         cursor.execute(
             """
-            SELECT manga_name, latest_chapter_local, latest_chapter_from_mangadex,
+            SELECT id, date_last_checked, manga_name, latest_chapter_local, latest_chapter_from_mangadex,
                    source_type, source_url, source_id, language, output_path
             FROM manga_data
             ORDER BY manga_name COLLATE NOCASE ASC
@@ -568,6 +568,8 @@ def get_tracked_manga(
     result: list[dict[str, float | str | None]] = []
     for row in rows:
         (
+            manga_id,
+            checked_at,
             manga_name,
             latest_local,
             latest_source,
@@ -579,6 +581,8 @@ def get_tracked_manga(
         ) = row
         result.append(
             {
+                "id": int(manga_id),
+                "date_last_checked": int(checked_at),
                 "manga_name": str(manga_name),
                 "latest_chapter_local": float(latest_local),
                 "latest_chapter_from_mangadex": float(latest_source),
@@ -642,6 +646,62 @@ def begin_download_run(
             (manga_id, now, max(0, int(total_pages))),
         ).fetchone()
         return int(row[0])
+
+
+def get_library_entries(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
+    """Return each tracked source with its latest recorded run, including idle titles."""
+    db_path = _resolve_db_path(db_path)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    with _database(db_path) as connection:
+        _ensure_schema_connection(connection)
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            """
+            SELECT m.*, r.status AS run_status, r.started_at, r.finished_at,
+                   r.total_pages, r.successful_pages, r.failed_pages
+            FROM manga_data AS m
+            LEFT JOIN download_runs AS r ON r.id = (
+                SELECT recent.id FROM download_runs AS recent
+                WHERE recent.manga_id = m.id
+                ORDER BY recent.started_at DESC, recent.id DESC LIMIT 1
+            )
+            ORDER BY m.manga_name COLLATE NOCASE, m.source_type, m.id
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_library_entry(selector: str, db_path: str = DEFAULT_DB_PATH) -> dict:
+    """Resolve an exact title or explicit ``id:123`` without guessing between sources."""
+    selector = selector.strip()
+    entries = get_library_entries(db_path)
+    if selector.lower().startswith("id:"):
+        try:
+            manga_id = int(selector[3:])
+        except ValueError:
+            raise ValueError("Use id:NUMBER, for example id:3, or an exact title.") from None
+        matches = [entry for entry in entries if entry["id"] == manga_id]
+    else:
+        matches = [
+            entry for entry in entries if entry["manga_name"].casefold() == selector.casefold()
+        ]
+    if not matches:
+        raise ValueError(
+            f"No tracked title matches {selector!r}. Use 'library list' to see titles."
+        )
+    if len(matches) > 1:
+        choices = ", ".join(f"id:{entry['id']} ({entry['source_type']})" for entry in matches)
+        raise ValueError(f"Multiple sources match {selector!r}; select one with {choices}.")
+    return matches[0]
+
+
+def mark_library_checked(manga_id: int, db_path: str = DEFAULT_DB_PATH) -> None:
+    """Record a completed source check even when it found no new pages."""
+    with _database(_resolve_db_path(db_path)) as connection:
+        connection.execute(
+            "UPDATE manga_data SET date_last_checked = ? WHERE id = ?",
+            (int(time.time()), manga_id),
+        )
 
 
 def record_page_results(

@@ -17,13 +17,43 @@ For each tracked row in `manga_data`, MDL:
 1. Reads `manga_name` and `latest_chapter_local`
 2. Picks a safe resume chapter (integer part of latest local chapter)
 3. Scans for available pages from that point onward
-4. Downloads only missing files
+4. Downloads missing files, reusing pages already in CBZ archives when CBZ output is selected
 5. Updates DB metadata (`date_last_checked`, latest chapters)
 
 New downloads store their source type, original URL, source ID, language, and output
-folder. Auto-update routes MangaDex, WeebCentral, and Webtoons records back through
+folder. Auto-update routes MangaDex, WeebCentral, Webtoons, MangaPill, and Manganato records back through
 their matching scraper. Migrated legacy rows remain `generic` because their original
 source cannot be recovered safely.
+
+## Library Commands
+
+```bash
+uv run python main.py library list
+uv run python main.py library status "One Piece"
+uv run python main.py library update "One Piece" --workers 10
+uv run python main.py library update id:3 --cbz-layout chapter
+```
+
+`list` and `status` show saved information without querying a source. Status includes
+the saved URL and folder, highest completed local chapter, last check time, and most
+recent download run's page counts. A saved run is not a live source check or an
+integrity check; use `library update` and `--verify` for those operations.
+
+Titles match exactly, ignoring case. When the same title is tracked from multiple
+sources, use its `id:NUMBER` from `library list`. No source is selected automatically
+for an ambiguous title. Numeric manga titles such as `86` remain title searches.
+
+`update` uses the selected row's source, language, and saved output directory, even
+when invoked from another working directory. Update commands return a nonzero exit
+code for failed or interrupted updates. Full-library updates continue to the next
+title after a source error and report the failed count.
+
+CBZ output defaults to one combined book with ComicInfo metadata. Use
+`--cbz-layout chapter` for separate chapter archives, or save `"cbz_layout": "chapter"`
+in the config. Combined mode merges existing MDL chapter archives and removes them
+after validating the book. Empty chapter folders are cleaned up on repeat downloads.
+Switching to chapter mode retains existing combined archives. Both layouts support
+verification and repair.
 
 Each run also records page-level outcomes. Inspect them with:
 

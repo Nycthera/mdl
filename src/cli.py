@@ -36,38 +36,62 @@ def _chapter_type(value: str) -> int:
     return number
 
 
-def parse_args():
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Manga Downloader CLI")
-    parser.add_argument("-M", "--manga", help="Manga name or MangaDex URL")
-    parser.add_argument("--start-chapter", type=_chapter_type)
-    parser.add_argument("--start-page", type=_positive_int)
-    parser.add_argument("--max-pages", type=_positive_int)
+def _download_options(parser, *, suppress_defaults=False):
+    """Allow the same download settings before or after library subcommands."""
+
+    def default(value=None):
+        return argparse.SUPPRESS if suppress_defaults else value
+
     parser.add_argument(
         "--workers",
         type=_workers_type,
+        default=default(),
         help="Concurrent downloads (1-100). Higher = faster but more likely to trip rate limits.",
     )
     parser.add_argument(
         "--max-retries",
         type=_positive_int,
-        default=5,
+        default=default(5),
         help="Max retry attempts per failed image (default: 5). Uses classified "
         "backoff: 429 backs off 3-12s, 5xx uses exponential, 4xx fails fast.",
     )
     parser.add_argument(
         "--timeout",
         type=_positive_int,
-        default=30,
+        default=default(30),
         help="Per-request timeout in seconds (default: 30). "
         "Applies to connect + read; image downloads cap at this total.",
     )
-    parser.add_argument("--cbz", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--cbz", action=argparse.BooleanOptionalAction, default=default())
+    parser.add_argument(
+        "--output-format",
+        choices=("cbz", "epub", "pdf"),
+        default=default(),
+        help="Package downloaded pages as cbz (default), epub, or pdf.",
+    )
+    parser.add_argument(
+        "--cbz-layout",
+        choices=("series", "chapter"),
+        default=default(),
+        help="One combined book per series (default), or a separate CBZ per chapter.",
+    )
+    parser.add_argument(
+        "--metadata-language",
+        default=default(),
+        metavar="CODE",
+        help="Override the language stored in CBZ metadata (e.g. en, ja).",
+    )
+    parser.add_argument(
+        "--reading-direction",
+        choices=("auto", "rtl", "ltr"),
+        default=default(),
+        help="CBZ reading direction; auto uses ltr for Webtoons and rtl for manga.",
+    )
     parser.add_argument(
         "--optimize-images",
         nargs="?",
         const="balanced",
-        default="off",
+        default=default("off"),
         choices=("off", "lossless", "balanced", "small"),
         metavar="MODE",
         help="Optimize pages as they download: lossless, balanced (default when set), "
@@ -76,8 +100,25 @@ def parse_args():
     parser.add_argument(
         "--clean-output",
         action="store_true",
+        default=default(False),
         help="Minimal output: no banner, no progress bars",
     )
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        default=default(False),
+        help="Enable developer debug logs",
+    )
+
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Manga Downloader CLI")
+    parser.add_argument("-M", "--manga", help="Manga name or supported source URL")
+    parser.add_argument("--start-chapter", type=_chapter_type)
+    parser.add_argument("--start-page", type=_positive_int)
+    parser.add_argument("--max-pages", type=_positive_int)
+    _download_options(parser)
     parser.add_argument("--md-lang", default=None, help="Language code for MangaDex download")
     parser.add_argument(
         "--credits",
@@ -113,13 +154,41 @@ def parse_args():
         help="Verify and redownload damaged pages using stored page history",
     )
     parser.add_argument(
-        "--dev",
-        action="store_true",
-        help="Enable developer debug logs",
-    )
-    parser.add_argument(
         "--version",
         action="version",
         version=f"%(prog)s {__version__}",
     )
-    return parser.parse_args()
+    commands = parser.add_subparsers(dest="command")
+    library = commands.add_parser("library", help="List, inspect, or update tracked titles")
+    actions = library.add_subparsers(dest="library_action", required=True)
+    listing = actions.add_parser("list", help="List tracked titles and their last recorded run")
+    status = actions.add_parser("status", help="Inspect a title's saved status and location")
+    update = actions.add_parser("update", help="Check and update one tracked title")
+    _download_options(update, suppress_defaults=True)
+    for command in (listing, status):
+        command.add_argument(
+            "--clean-output",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Hide the application banner",
+        )
+        command.add_argument(
+            "--dev",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Enable developer debug logs",
+        )
+    for command in (status, update):
+        command.add_argument("selector", metavar="TITLE_OR_ID", help="Exact title or id:NUMBER")
+    args = parser.parse_args()
+    if args.command == "library" and (
+        args.manga
+        or args.auto_update_db
+        or args.update
+        or args.download_history is not None
+        or args.verify
+        or args.repair
+        or args.credits
+    ):
+        parser.error("library commands cannot be combined with another action")
+    return args

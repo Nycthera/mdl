@@ -24,12 +24,13 @@ Designed as a drop-in helper. Existing scrapers can adopt it incrementally.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import random
 import threading
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
@@ -47,8 +48,45 @@ DEFAULT_CONNECTOR_KWARGS = dict(
     force_close=False,  # keep connections alive (HTTP keep-alive)
 )
 
-DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
+DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
+    total=30, connect=10, sock_connect=10, sock_read=20
+)
 HEAD_TIMEOUT = aiohttp.ClientTimeout(total=5, connect=5, sock_read=5)
+
+
+def validate_http_url(url: str, *, allowed_hosts: tuple[str, ...] = ()) -> str:
+    """Validate a URL before making a request or following a redirect."""
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError(f"Unsupported or invalid URL: {url}")
+    if parsed.username or parsed.password:
+        raise ValueError(f"Credentials are not allowed in URL: {url}")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address is not None and (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_unspecified
+        or address.is_reserved
+    ):
+        raise ValueError(f"Private or non-routable URL rejected: {url}")
+    if allowed_hosts and not any(
+        hostname == host or hostname.endswith(f".{host}") for host in allowed_hosts
+    ):
+        raise ValueError(f"Unexpected host in URL: {url}")
+    return url
+
+
+def redirect_target(url: str, location: str | None) -> str:
+    """Resolve and validate a redirect target relative to the current URL."""
+    if not location:
+        raise ValueError(f"Redirect from {url} has no destination")
+    return validate_http_url(urljoin(url, location))
 
 
 def get_default_timeout() -> aiohttp.ClientTimeout:
@@ -144,7 +182,8 @@ def classify_failure(
             if isinstance(exc, asyncio.TimeoutError):
                 return "retryable"
             if isinstance(
-                exc, (aiohttp.ClientConnectorDNSError, aiohttp.ClientProxyConnectionError)
+                exc,
+                (aiohttp.ClientConnectorDNSError, aiohttp.ClientProxyConnectionError),
             ):
                 return "permanent"
             if isinstance(exc, aiohttp.ClientError):
@@ -349,6 +388,10 @@ async def download_image_streaming(
     """
     if stop_check is not None and stop_check():
         return False, "interrupted"
+    try:
+        validate_http_url(url)
+    except ValueError as exc:
+        return False, f"unsafe-url:{exc}"
 
     os.makedirs(folder, exist_ok=True)
     filename = image_filename(url)
@@ -379,10 +422,19 @@ async def download_image_streaming(
                 url,
                 timeout=timeout or DEFAULT_TIMEOUT,
                 headers=headers or None,
+                allow_redirects=False,
             ) as r:
+                if r.status in {301, 302, 303, 307, 308}:
+                    try:
+                        url = redirect_target(url, r.headers.get("Location"))
+                    except ValueError as exc:
+                        return False, f"unsafe-redirect:{filename}:{exc}"
+                    continue
                 if r.status >= 400:
                     # Sniff body for CF classification (cap at 4 KB to bound cost).
-                    body_snippet = await r.content.read(4096) if r.status in (403, 503) else b""
+                    body_snippet = (
+                        await r.content.read(4096) if r.status in (403, 503) else b""
+                    )
                     cls = classify_failure(r.status, body_snippet=body_snippet)
                     last_cls = cls
                     if on_failure_class:
@@ -407,7 +459,9 @@ async def download_image_streaming(
                     last_cls = "retryable"
                     if attempt == max_retries:
                         return False, f"empty-response:{filename}"
-                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_base))
+                    await asyncio.sleep(
+                        compute_backoff("retryable", attempt, backoff_base)
+                    )
                     continue
 
                 # Atomic write: pending tempfile -> os.replace to final path.
@@ -479,7 +533,9 @@ async def make_request(
             ) as r:
                 last_status = r.status
                 if r.status >= 400:
-                    body_snippet = await r.content.read(4096) if r.status in (403, 503) else b""
+                    body_snippet = (
+                        await r.content.read(4096) if r.status in (403, 503) else b""
+                    )
                     cls = classify_failure(r.status, body_snippet=body_snippet)
                     _host_cap.record_failure(url, cls)
                     if cls == "permanent" or attempt == max_retries:

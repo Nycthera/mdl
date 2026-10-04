@@ -100,7 +100,6 @@ async def _collect_chapter_urls_for_download(
     mirror (the common case at the end of every chapter).
     """
     chapter_folder = os.path.join(folder_base, f"chapter_{chapter_label}")
-    os.makedirs(chapter_folder, exist_ok=True)
     urls = _build_chapter_urls(manga_name, chapter_label, start_page, max_pages, base_urls)
     if not urls or not base_urls:
         return [], chapter_folder

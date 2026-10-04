@@ -42,6 +42,7 @@ from src.http import (
     download_image_streaming,
     get_default_timeout,
     get_host_cap,
+    validate_http_url,
 )
 from src.utils import Colors, _cancel_pending_tasks, _loop_time, image_filename
 
@@ -109,6 +110,10 @@ async def download_image(
     """
     if stop_signal:
         return f"{Colors.RED}Download interrupted{Colors.RESET}"
+    try:
+        validate_http_url(url)
+    except ValueError as exc:
+        return f"{Colors.RED}Unsafe URL: {exc}{Colors.RESET}"
 
     os.makedirs(folder, exist_ok=True)
     filename = image_filename(url)
@@ -133,7 +138,14 @@ async def download_image(
         if stop_signal:
             return f"{Colors.RED}Download interrupted{Colors.RESET}"
         try:
-            async with session.get(url, timeout=get_default_timeout(), headers=headers) as r:
+            async with session.get(
+                url,
+                timeout=get_default_timeout(),
+                headers=headers,
+                allow_redirects=False,
+            ) as r:
+                if r.status in {301, 302, 303, 307, 308}:
+                    return f"{Colors.RED}Unsafe redirect rejected for {filename}{Colors.RESET}"
                 if r.status >= 400:
                     # Best-effort body sniff for Cloudflare classification.
                     body_snippet = b""
@@ -164,7 +176,9 @@ async def download_image(
                             f"{Colors.RED}Failed to download {filename} after "
                             f"{max_retries} attempts: empty response{Colors.RESET}"
                         )
-                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_factor))
+                    await asyncio.sleep(
+                        compute_backoff("retryable", attempt, backoff_factor)
+                    )
                     continue
 
                 # Atomic write: pending tempfile -> os.replace to final path.
@@ -276,10 +290,11 @@ class DownloadResult:
     successful_pages: int
     total_pages: int
     completed_folders: list[str]
+    discovery_complete: bool = True
 
     @property
     def complete(self) -> bool:
-        return self.successful_pages == self.total_pages
+        return self.discovery_complete and self.successful_pages == self.total_pages
 
 
 class AdaptiveHostLimiter:
@@ -325,7 +340,9 @@ async def _persist_run_history(
     interrupted: bool,
 ) -> None:
     """Persist collected page outcomes and close a durable run."""
-    successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    successful_pages = sum(
+        not _download_failed(value) for value in page_results.values()
+    )
     history_rows = [
         (
             url,
@@ -361,6 +378,7 @@ async def download_all_pages(
     output_path: str | None = None,
     track_history: bool | None = None,
     optimize_mode: str = "off",
+    skip_archived: bool = False,
 ) -> DownloadResult:
     """Download all pages with progress tracking.
 
@@ -381,15 +399,27 @@ async def download_all_pages(
     if total_pages == 0:
         return DownloadResult(0, 0, [])
 
-    # Sync makedirs is cheap and avoids an asyncio.to_thread call per folder.
-    for _, folder in urls_to_download:
-        os.makedirs(folder, exist_ok=True)
-
     if output_path is None:
         folders = [os.path.abspath(folder) for _, folder in urls_to_download]
         output_path = os.path.commonpath(folders)
         if len(set(folders)) == 1:
             output_path = os.path.dirname(output_path)
+
+    archived_pages = {}
+    if skip_archived:
+        from src.cbz import index_cbz_pages
+
+        archived_pages = await asyncio.to_thread(
+            index_cbz_pages,
+            output_path,
+            folders={folder for _, folder in urls_to_download},
+        )
+    for url, folder in urls_to_download:
+        if (
+            os.path.realpath(os.path.join(folder, image_filename(url)))
+            not in archived_pages
+        ):
+            os.makedirs(folder, exist_ok=True)
 
     # Tune the AIMD baseline to match the requested worker count and enforce
     # its changing per-host limits in the live scheduler.
@@ -426,6 +456,12 @@ async def download_all_pages(
 
         async def download_worker(args: tuple[str, str]) -> tuple[tuple[str, str], str]:
             url, folder = args
+            if (
+                not stop_signal
+                and os.path.realpath(os.path.join(folder, image_filename(url)))
+                in archived_pages
+            ):
+                return args, f"Already downloaded (CBZ): {image_filename(url)}"
             async with host_limiter.slot(url):
                 async with sem:
                     result = await download_image(
@@ -446,7 +482,9 @@ async def download_all_pages(
                     )
             return args, result
 
-        tasks = [asyncio.create_task(download_worker(item)) for item in urls_to_download]
+        tasks = [
+            asyncio.create_task(download_worker(item)) for item in urls_to_download
+        ]
 
         try:
             if not CLEAN_OUTPUT:
@@ -462,7 +500,9 @@ async def download_all_pages(
                     console=console,
                     transient=True,
                 ) as progress:
-                    task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
+                    task = progress.add_task(
+                        "Downloading", total=total_pages, pages_per_sec="0.0"
+                    )
 
                     start_time = _loop_time()
                     completed = 0
@@ -508,7 +548,9 @@ async def download_all_pages(
 
     if track_to_db and not stop_signal and urls_to_download:
         try:
-            chapter_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
+            chapter_folders = _get_trackable_chapter_folders(
+                urls_to_download, page_results
+            )
             if DEV_MODE and not CLEAN_OUTPUT:
                 console.print(
                     f"[bold blue][db][/bold blue] Triggering save from downloader for '{manga_name}'"
@@ -545,7 +587,9 @@ async def download_all_pages(
             f"[bold blue][db][/bold blue] Skipping save for '{manga_name}' because no pages were queued"
         )
 
-    successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    successful_pages = sum(
+        not _download_failed(value) for value in page_results.values()
+    )
     if run_id is not None:
         try:
             await _persist_run_history(

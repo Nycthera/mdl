@@ -26,6 +26,9 @@ def create_default_config() -> None:
         "max_pages": 50,
         "workers": 10,
         "cbz": True,
+        "output_format": "cbz",
+        "cbz_layout": "series",
+        "reading_direction": "auto",
         "clean_output": False,
         "md_language": "en",
         "credits_shown": False,
@@ -60,14 +63,23 @@ def load_config() -> dict[str, Any]:
     for key in ("cbz", "clean_output", "credits_shown", "update"):
         if key in config and type(config[key]) is not bool:
             raise ValueError(f"Configuration option {key} must be a boolean")
-    for key in ("manga_name", "md_language"):
+    for key in ("manga_name", "md_language", "metadata_language"):
         if key in config and not isinstance(config[key], str):
             raise ValueError(f"Configuration option {key} must be a string")
+    if config.get("output_format", "cbz") not in ("cbz", "epub", "pdf"):
+        raise ValueError("Configuration option output_format must be cbz, epub, or pdf")
+    if config.get("cbz_layout", "series") not in ("chapter", "series"):
+        raise ValueError("Configuration option cbz_layout must be chapter or series")
+    if config.get("reading_direction", "auto") not in ("auto", "rtl", "ltr"):
+        raise ValueError("Configuration option reading_direction must be auto, rtl, or ltr")
 
     # Add missing keys with defaults
     changed = False
     if "credits_shown" not in config:
         config["credits_shown"] = False
+        changed = True
+    if "cbz_layout" not in config:
+        config["cbz_layout"] = "series"
         changed = True
 
     if changed:

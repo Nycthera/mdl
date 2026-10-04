@@ -6,9 +6,11 @@ import asyncio
 import os
 import time
 import zipfile
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
+from src.cbz import index_cbz_pages
 from src.database.manga_db import get_latest_page_records
 from src.utils import sanitize_folder_name
 
@@ -21,6 +23,8 @@ class VerificationIssue:
     reason: str
     url: str | None = None
     folder: str | None = None
+    archive_path: str | None = None
+    archive_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -74,7 +78,7 @@ def verify_library(root: str) -> VerificationReport:
     """Check known pages plus image files found below ``root``."""
     root_path = Path(root).expanduser().resolve()
     records = get_latest_page_records(str(root_path))
-    expected = {record["file_path"]: record for record in records}
+    expected = {str(Path(record["file_path"]).resolve()): record for record in records}
     paths: dict[str, dict[str, str] | None] = {path: record for path, record in expected.items()}
 
     if not root_path.exists() and not paths:
@@ -88,29 +92,30 @@ def verify_library(root: str) -> VerificationReport:
             if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
                 paths.setdefault(str(path.resolve()), None)
 
-    issues: list[VerificationIssue] = []
-    archive_path = root_path / f"{sanitize_folder_name(root_path.name)}.cbz"
-    archive = None
-    if root_path.is_dir() and archive_path.exists():
-        try:
-            archive = zipfile.ZipFile(archive_path)
-        except (OSError, zipfile.BadZipFile) as exc:
-            issues.append(VerificationIssue(str(archive_path), f"unreadable archive: {exc}"))
-    try:
-        archived_names = set(archive.namelist()) if archive else set()
+    archive_errors = []
+    archived = index_cbz_pages(str(root_path), errors=archive_errors) if root_path.is_dir() else {}
+    for path in archived:
+        paths.setdefault(path, None)
+    issues = [
+        VerificationIssue(path, f"unreadable archive: {error}") for path, error in archive_errors
+    ]
+    with ExitStack() as stack:
+        opened = {}
         for path_text, record in sorted(paths.items()):
             path = Path(path_text)
             url = record.get("url") if record else None
             folder = record.get("folder") if record else None
+            archive_path, archive_name = archived.get(path_text, (None, None))
             if path.exists():
                 problem = _image_problem(path)
             else:
-                try:
-                    archive_name = path.resolve().relative_to(root_path).as_posix()
-                except ValueError:
-                    archive_name = ""
-                if archive_name in archived_names:
+                if archive_path:
                     try:
+                        if archive_path not in opened:
+                            opened[archive_path] = stack.enter_context(
+                                zipfile.ZipFile(archive_path)
+                            )
+                        archive = opened[archive_path]
                         data = archive.read(archive_name)
                         problem = _image_data_problem(
                             path.suffix.lower(), len(data), data[:32], data[-32:]
@@ -120,10 +125,19 @@ def verify_library(root: str) -> VerificationReport:
                 else:
                     problem = "missing file"
             if problem:
-                issues.append(VerificationIssue(path_text, problem, url, folder))
-    finally:
-        if archive:
-            archive.close()
+                # A missing page can still belong to an existing archive.
+                if archive_path is None and path.is_relative_to(root_path):
+                    relative = path.relative_to(root_path)
+                    chapter_archive = root_path / f"{relative.parts[0]}.cbz"
+                    series_archive = root_path / f"{sanitize_folder_name(root_path.name)}.cbz"
+                    if len(relative.parts) > 1 and chapter_archive.is_file():
+                        archive_path = str(chapter_archive)
+                        archive_name = Path(*relative.parts[1:]).as_posix()
+                    elif series_archive.is_file():
+                        archive_path, archive_name = str(series_archive), relative.as_posix()
+                issues.append(
+                    VerificationIssue(path_text, problem, url, folder, archive_path, archive_name)
+                )
 
     return VerificationReport(str(root_path), len(paths), tuple(issues))
 
@@ -169,17 +183,24 @@ async def repair_library(
         except OSError:
             pass
 
-    archive_path = Path(root) / f"{sanitize_folder_name(Path(root).name)}.cbz"
-    if (
-        archive_path.exists()
-        and repairable
-        and all(
-            Path(issue.path).exists() and _image_problem(Path(issue.path)) is None
-            for issue in repairable
-        )
-    ):
-        from src.cbz import create_cbz_for_all
+    from src.cbz import _remove_archived_image_folders, update_cbz
 
-        await asyncio.to_thread(create_cbz_for_all, str(Path(root)))
+    archive_repairs: dict[str, dict[str, str]] = {}
+    for issue in repairable:
+        if (
+            issue.archive_path
+            and issue.archive_name
+            and Path(issue.path).exists()
+            and _image_problem(Path(issue.path)) is None
+        ):
+            archive_repairs.setdefault(issue.archive_path, {})[issue.archive_name] = issue.path
+    archived_files = set()
+    for archive_path, files in archive_repairs.items():
+        await asyncio.to_thread(update_cbz, archive_path, files, {})
+        archived_files.update(files.values())
+    if archived_files:
+        await asyncio.to_thread(
+            _remove_archived_image_folders, str(Path(root).resolve()), archived_files
+        )
 
     return before, verify_library(root)

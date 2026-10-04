@@ -4,7 +4,9 @@
 import asyncio
 import os
 import signal
+import sqlite3
 import sys
+import zipfile
 from urllib.parse import parse_qs, urlparse
 
 try:
@@ -56,7 +58,9 @@ from src.cli import parse_args
 from src.config import load_config, save_config
 from src.database.manga_db import (
     get_download_history,
+    get_library_entry,
     get_tracked_manga,
+    mark_library_checked,
 )
 from src.database.manga_db import (
     set_clean_output as set_db_clean_output,
@@ -65,6 +69,7 @@ from src.database.manga_db import (
     set_dev_mode as set_db_dev_mode,
 )
 from src.downloader import (
+    DownloadResult,
     download_all_pages,
 )
 from src.downloader import (
@@ -77,6 +82,8 @@ from src.downloader import (
     set_stop_signal as set_downloader_stop_signal,
 )
 from src.http import set_default_timeout
+from src.library import print_library, print_library_status
+from src.output_formats import create_output_for_all
 from src.scrapers.generic import (
     gather_all_urls,
 )
@@ -94,6 +101,26 @@ from src.scrapers.mangadex import (
 )
 from src.scrapers.mangadex import (
     set_stop_signal as set_md_stop_signal,
+)
+from src.scrapers.manganato import (
+    fetch_manganato_images,
+    is_manganato_url,
+)
+from src.scrapers.manganato import (
+    set_clean_output as set_manganato_clean_output,
+)
+from src.scrapers.manganato import (
+    set_stop_signal as set_manganato_stop_signal,
+)
+from src.scrapers.mangapill import (
+    fetch_mangapill_images,
+    is_mangapill_url,
+)
+from src.scrapers.mangapill import (
+    set_clean_output as set_mangapill_clean_output,
+)
+from src.scrapers.mangapill import (
+    set_stop_signal as set_mangapill_stop_signal,
 )
 from src.scrapers.webtoons import (
     WEBTOONS_REFERER,
@@ -117,6 +144,16 @@ from src.verification import repair_library, verify_library
 
 console = Console()
 
+
+def _create_selected_output(folder_path: str, output_format: str, **options) -> str | None:
+    """Create an output file while preserving the CBZ test and extension hook."""
+    if output_format == "cbz" and options.get("cbz_layout", "series") == "series":
+        return create_cbz_for_all(
+            folder_path, **{key: value for key, value in options.items() if key != "cbz_layout"}
+        )
+    return create_output_for_all(folder_path, output_format, **options)
+
+
 # Global state
 stop_signal = False
 CLEAN_OUTPUT = False
@@ -133,6 +170,8 @@ def set_global_clean_output(value: bool) -> None:
     set_md_clean_output(value)
     set_weeb_clean_output(value)
     set_webtoons_clean_output(value)
+    set_mangapill_clean_output(value)
+    set_manganato_clean_output(value)
     set_db_clean_output(value)
 
 
@@ -144,6 +183,8 @@ def set_global_stop_signal(value: bool) -> None:
     set_generic_stop_signal(value)
     set_md_stop_signal(value)
     set_webtoons_stop_signal(value)
+    set_mangapill_stop_signal(value)
+    set_manganato_stop_signal(value)
 
 
 def set_global_dev_mode(value: bool) -> None:
@@ -164,7 +205,7 @@ def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | N
     table.add_row("Chapters", str(chapters))
     table.add_row("Pages", str(pages))
     if cbz_path:
-        table.add_row("CBZ", cbz_path)
+        table.add_row("Output", cbz_path)
 
     console.print(
         Panel(
@@ -229,7 +270,7 @@ def _calculate_resume_chapter(latest_local: float) -> int:
 def _detect_source_from_input(manga_input: str) -> str | None:
     """Detect known source from a user input URL.
 
-    Returns one of: "mangadex", "weebcentral", "webtoons", or None.
+    Return the supported scraper name, or None for a direct-host input.
     """
     text = (manga_input or "").strip()
     if not text:
@@ -247,7 +288,195 @@ def _detect_source_from_input(manga_input: str) -> str | None:
         return "weebcentral"
     if host == "webtoons.com" or host.endswith(".webtoons.com"):
         return "webtoons"
+    normalized = "https://" + text if text.lower().startswith("www.") else text
+    if is_mangapill_url(normalized):
+        return "mangapill"
+    if is_manganato_url(normalized):
+        return "manganato"
     return None
+
+
+def _cbz_options(source, title, source_url, language, cbz_layout, reading_direction):
+    direction = reading_direction
+    if direction == "auto":
+        direction = "ltr" if source == "webtoons" else "rtl"
+    return {
+        "cbz_layout": cbz_layout,
+        "series": title,
+        "source_url": source_url,
+        "language": language,
+        "reading_direction": direction,
+    }
+
+
+async def _download_url_source(
+    source,
+    url,
+    *,
+    workers,
+    max_retries,
+    start_chapter=0,
+    output_format=None,
+    cbz_layout="series",
+    reading_direction="auto",
+    metadata_language=None,
+    optimize_mode="off",
+    output_path=None,
+    manga_name=None,
+    source_id=None,
+):
+    """Download a routed HTML/browser source using the same path for library updates."""
+    language = metadata_language
+    if source == "weebcentral":
+        images, title = await fetch_weebcentral_images(url)
+        chapter_id = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
+        pages = [(image, sanitize_folder_name(chapter_id)) for image in dict.fromkeys(images)]
+        source_id = source_id or chapter_id
+        _, title = get_slug_and_pretty(title)
+        referer = url
+    elif source == "webtoons":
+        pages, title = await fetch_webtoons_images(url)
+        source_id = source_id or parse_qs(urlparse(url).query).get("title_no", [None])[0]
+        referer = WEBTOONS_REFERER
+        if not language:
+            language = urlparse(url).path.strip("/").split("/")[0] or None
+    else:
+        fetcher = fetch_mangapill_images if source == "mangapill" else fetch_manganato_images
+        pages, title = await fetcher(
+            url, workers=workers, start_chapter=start_chapter, max_retries=max_retries
+        )
+        referer = url
+    title = manga_name or title
+    destination = output_path or sanitize_folder_name(title)
+    if not pages:
+        if stop_signal:
+            return DownloadResult(0, 0, [])
+        if source in ("webtoons", "weebcentral"):
+            raise RuntimeError(f"No images found at {url}")
+        console.print(f"No chapters at or after {start_chapter} for {title}.")
+        return DownloadResult(0, 0, [])
+    urls = [(image, os.path.join(destination, folder)) for image, folder in pages]
+    result = await download_all_pages(
+        urls,
+        max_workers=workers,
+        manga_name=title,
+        max_retries=max_retries,
+        referer=referer,
+        source_type=source,
+        source_url=url,
+        source_id=source_id,
+        language=language,
+        output_path=destination,
+        optimize_mode=optimize_mode,
+        skip_archived=output_format == "cbz",
+    )
+    output = None
+    if output_format and result.complete and not stop_signal:
+        output = await asyncio.to_thread(
+            _create_selected_output,
+            destination,
+            output_format,
+            **_cbz_options(source, title, url, language, cbz_layout, reading_direction),
+        )
+    if CLEAN_OUTPUT:
+        print_clean_summary(title, len(result.completed_folders), result.successful_pages, output)
+    return result
+
+
+async def _update_tracked_title(
+    item,
+    *,
+    workers,
+    start_page,
+    max_pages,
+    max_retries,
+    output_format,
+    cbz_layout,
+    reading_direction,
+    metadata_language,
+    optimize_mode,
+):
+    title = str(item["manga_name"])
+    source = str(item.get("source_type") or "generic")
+    source_url = item.get("source_url")
+    destination = item.get("output_path")
+    start_chapter = _calculate_resume_chapter(float(item["latest_chapter_local"]))
+    if source != "generic":
+        start_chapter = max(0, int(float(item["latest_chapter_local"])))
+    if not CLEAN_OUTPUT:
+        console.print(f"Checking '{title}' via {source} from chapter {start_chapter}")
+    if source == "mangadex" and source_url:
+        options = {
+            "lang": str(item.get("language") or "en"),
+            "create_cbz": bool(output_format),
+            "max_workers": workers,
+            "max_retries": max_retries,
+            "start_chapter": start_chapter,
+            "optimize_mode": optimize_mode,
+            "output_path": destination,
+            "cbz_layout": cbz_layout,
+            "reading_direction": reading_direction,
+            "metadata_language": metadata_language,
+        }
+        if output_format is not None:
+            options["output_format"] = output_format
+        return await download_md_chapters(str(source_url), **options)
+    if source in ("weebcentral", "webtoons", "mangapill", "manganato") and source_url:
+        return await _download_url_source(
+            source,
+            str(source_url),
+            workers=workers,
+            max_retries=max_retries,
+            start_chapter=start_chapter,
+            output_format=output_format,
+            cbz_layout=cbz_layout,
+            reading_direction=reading_direction,
+            metadata_language=metadata_language or item.get("language"),
+            optimize_mode=optimize_mode,
+            output_path=destination,
+            manga_name=title,
+            source_id=item.get("source_id"),
+        )
+    if source != "generic":
+        raise ValueError(f"Cannot update {title!r}: missing URL or unsupported source {source!r}.")
+    slug, inferred_name = get_slug_and_pretty(title)
+    destination = str(destination or inferred_name)
+    urls = await gather_all_urls(
+        slug,
+        start_chapter=start_chapter,
+        start_page=start_page,
+        max_pages=max_pages,
+        max_decimals=10,
+        workers=workers,
+        folder_base=destination,
+    )
+    if not urls:
+        if not CLEAN_OUTPUT:
+            console.print(f"No new pages for '{title}'.")
+        return DownloadResult(0, 0, [])
+    options = {"skip_archived": True} if output_format == "cbz" else {}
+    result = await download_all_pages(
+        urls,
+        max_workers=workers,
+        manga_name=title,
+        max_retries=max_retries,
+        source_type="generic",
+        source_url=str(source_url) if source_url else None,
+        source_id=str(item["source_id"]) if item.get("source_id") else None,
+        output_path=destination,
+        optimize_mode=optimize_mode,
+        **options,
+    )
+    if output_format and result.complete and not stop_signal:
+        await asyncio.to_thread(
+            _create_selected_output,
+            destination,
+            output_format,
+            **_cbz_options(
+                source, title, source_url, metadata_language, cbz_layout, reading_direction
+            ),
+        )
+    return result
 
 
 async def _auto_update_from_db(
@@ -257,140 +486,48 @@ async def _auto_update_from_db(
     cbz_flag: bool,
     max_retries: int = 5,
     optimize_mode: str = "off",
-) -> None:
-    """Process all tracked manga and fetch only new chapters."""
-    tracked = get_tracked_manga()
+    output_format: str | None = None,
+    *,
+    tracked: list[dict] | None = None,
+    cbz_layout: str = "series",
+    reading_direction: str = "auto",
+    metadata_language: str | None = None,
+) -> bool:
+    """Check the entire library or an explicitly selected title; report partial failures."""
+    tracked = get_tracked_manga() if tracked is None else tracked
     if not tracked:
-        if not CLEAN_OUTPUT:
-            console.print("[yellow]No tracked manga found in database.[/]")
-        return
-
-    if not CLEAN_OUTPUT:
-        console.print(f"[bold cyan]DB auto-update: checking {len(tracked)} tracked manga[/]")
-
-    processed = 0
-    updated = 0
-
+        console.print("No tracked manga found in database.")
+        return True
+    if output_format is None and cbz_flag:
+        output_format = "cbz"
+    checked = failed = 0
     for item in tracked:
         if stop_signal:
             break
-
-        manga_name = str(item["manga_name"])
-        latest_local = float(item["latest_chapter_local"])
-        source_type = str(item.get("source_type") or "generic")
-        source_url = item.get("source_url")
-        stored_output_path = item.get("output_path")
-        output_path = str(stored_output_path or manga_name)
-        # Stored source numbers are a snapshot, not a live release check.
-        # Always probe the source; otherwise up-to-date rows never update again.
-
-        start_chapter = _calculate_resume_chapter(latest_local)
-
-        if not CLEAN_OUTPUT:
-            console.print(
-                f"[cyan]Checking '{manga_name}' via {source_type} from chapter "
-                f"{start_chapter} (db latest={latest_local})[/]"
-            )
-
-        processed += 1
-        if source_type == "mangadex" and source_url:
-            await download_md_chapters(
-                str(source_url),
-                lang=str(item.get("language") or "en"),
-                create_cbz=cbz_flag,
-                max_workers=workers,
+        checked += 1
+        try:
+            result = await _update_tracked_title(
+                item,
+                workers=workers,
+                start_page=start_page,
+                max_pages=max_pages,
                 max_retries=max_retries,
-                start_chapter=start_chapter,
+                output_format=output_format,
+                cbz_layout=cbz_layout,
+                reading_direction=reading_direction,
+                metadata_language=metadata_language,
                 optimize_mode=optimize_mode,
             )
-            updated += 1
-            continue
-
-        if source_type == "weebcentral" and source_url:
-            image_urls, _ = await fetch_weebcentral_images(str(source_url))
-            chapter_id = urlparse(str(source_url)).path.rstrip("/").rsplit("/", 1)[-1]
-            folder = os.path.join(output_path, sanitize_folder_name(chapter_id))
-            download_result = await download_all_pages(
-                [(url, folder) for url in dict.fromkeys(image_urls)],
-                max_workers=workers,
-                manga_name=manga_name,
-                max_retries=max_retries,
-                source_type=source_type,
-                source_url=str(source_url),
-                source_id=str(item.get("source_id") or chapter_id),
-                output_path=output_path,
-                optimize_mode=optimize_mode,
-            )
-            updated += int(download_result.complete)
-            if cbz_flag and download_result.complete and not stop_signal:
-                await asyncio.to_thread(create_cbz_for_all, output_path)
-            continue
-
-        if source_type == "webtoons" and source_url:
-            pages, _ = await fetch_webtoons_images(str(source_url))
-            download_result = await download_all_pages(
-                [(url, os.path.join(output_path, folder)) for url, folder in pages],
-                max_workers=workers,
-                manga_name=manga_name,
-                max_retries=max_retries,
-                referer=WEBTOONS_REFERER,
-                source_type=source_type,
-                source_url=str(source_url),
-                source_id=str(item.get("source_id") or "") or None,
-                output_path=output_path,
-                optimize_mode=optimize_mode,
-            )
-            updated += int(download_result.complete)
-            if cbz_flag and download_result.complete and not stop_signal:
-                await asyncio.to_thread(create_cbz_for_all, output_path)
-            continue
-
-        slug, inferred_name = get_slug_and_pretty(manga_name)
-        pretty_name = str(stored_output_path or inferred_name)
-        urls_to_download = await gather_all_urls(
-            slug,
-            start_chapter=start_chapter,
-            start_page=start_page,
-            max_pages=max_pages,
-            max_decimals=10,
-            workers=workers,
-            folder_base=pretty_name,
-        )
-
-        if not urls_to_download:
-            if not CLEAN_OUTPUT:
-                console.print(f"[yellow]No new pages for '{manga_name}'.[/]")
-            continue
-
-        download_result = await download_all_pages(
-            urls_to_download,
-            max_workers=workers,
-            manga_name=manga_name,
-            max_retries=max_retries,
-            source_type="generic",
-            source_url=str(source_url) if source_url else None,
-            source_id=str(item["source_id"]) if item.get("source_id") else None,
-            output_path=pretty_name,
-            optimize_mode=optimize_mode,
-        )
-        updated += int(download_result.complete)
-
-        if cbz_flag and not stop_signal and download_result.complete:
-            if os.path.isdir(pretty_name) and any(
-                f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
-            ):
-                # Archive file operations are synchronous — run in a thread
-                # so the event loop is not blocked during CBZ packaging.
-                cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
-                if cbz_created_path and not CLEAN_OUTPUT:
-                    console.print(
-                        f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
-                    )
-
-    if not CLEAN_OUTPUT:
-        console.print(
-            f"[bold cyan]DB auto-update complete:[/] checked={processed}, updated={updated}"
-        )
+            if result is not None and not result.complete:
+                failed += 1
+                console.print(f"Incomplete download for '{item['manga_name']}'.")
+            if item.get("id") is not None and not stop_signal:
+                await asyncio.to_thread(mark_library_checked, item["id"])
+        except (OSError, RuntimeError, ValueError, sqlite3.Error, zipfile.BadZipFile) as exc:
+            failed += 1
+            console.print(f"Could not update '{item['manga_name']}': {exc}")
+    console.print(f"Library update: checked={checked}, failed={failed}")
+    return failed == 0 and not stop_signal
 
 
 # ============================================================================
@@ -416,8 +553,14 @@ async def main():
     max_pages = args.max_pages or config.get("max_pages", 50)
     workers = args.workers or config.get("workers", 10)
     cbz_flag = args.cbz if args.cbz is not None else config.get("cbz", True)
+    output_format = args.output_format or (config.get("output_format", "cbz") if cbz_flag else None)
+    if args.output_format is None and args.cbz is not None:
+        output_format = "cbz" if args.cbz else None
+    cbz_layout = args.cbz_layout or config.get("cbz_layout", "series")
+    reading_direction = args.reading_direction or config.get("reading_direction", "auto")
+    metadata_language = args.metadata_language or config.get("metadata_language")
     md_lang = args.md_lang or config.get("md_language", "en")
-    update_flag = args.update or config.get("update", False)
+    update_flag = args.update or (config.get("update", False) if args.command is None else False)
     auto_update_db_flag = args.auto_update_db
     dev_flag = args.dev
     clean_flag = args.clean_output or config.get("clean_output", False)
@@ -441,6 +584,33 @@ async def main():
         credits(show=True)
         return
 
+    update_options = {
+        "workers": workers,
+        "start_page": start_page,
+        "max_pages": max_pages,
+        "cbz_flag": bool(output_format),
+        "max_retries": max_retries,
+        "optimize_mode": optimize_mode,
+        "output_format": output_format,
+        "cbz_layout": cbz_layout,
+        "reading_direction": reading_direction,
+        "metadata_language": metadata_language,
+    }
+    if args.command == "library":
+        try:
+            if args.library_action == "list":
+                await asyncio.to_thread(print_library, console)
+            elif args.library_action == "status":
+                await asyncio.to_thread(print_library_status, console, args.selector)
+            else:
+                entry = await asyncio.to_thread(get_library_entry, args.selector)
+                if not await _auto_update_from_db(tracked=[entry], **update_options):
+                    raise SystemExit(1)
+        except ValueError as exc:
+            console.print(str(exc))
+            raise SystemExit(1) from exc
+        return
+
     if args.download_history is not None:
         _print_download_history(args.download_history)
         return
@@ -462,14 +632,8 @@ async def main():
         return
 
     if auto_update_db_flag:
-        await _auto_update_from_db(
-            workers=workers,
-            start_page=start_page,
-            max_pages=max_pages,
-            cbz_flag=cbz_flag,
-            max_retries=max_retries,
-            optimize_mode=optimize_mode,
-        )
+        if not await _auto_update_from_db(**update_options):
+            raise SystemExit(1)
         return
 
     if not config.get("credits_shown", False):
@@ -489,133 +653,35 @@ async def main():
             manga_name,
             lang=md_lang,
             use_saver=False,
-            create_cbz=cbz_flag,
+            create_cbz=bool(output_format),
+            output_format=output_format or "cbz",
             max_workers=workers,
             max_retries=max_retries,
             start_chapter=args.start_chapter if args.start_chapter is not None else 0,
             optimize_mode=optimize_mode,
+            cbz_layout=cbz_layout,
+            reading_direction=reading_direction,
+            metadata_language=metadata_language,
         )
         return
 
-    # ---- WeebCentral explicit URL case ----
-    if source == "weebcentral":
-        if not CLEAN_OUTPUT:
-            console.print(
-                Panel.fit(
-                    "[bold magenta] Entering WeebCentral Mode [/]",
-                    border_style="magenta",
-                )
+    if source in ("weebcentral", "webtoons", "mangapill", "manganato"):
+        try:
+            await _download_url_source(
+                source,
+                str(manga_name),
+                workers=workers,
+                max_retries=max_retries,
+                start_chapter=args.start_chapter if args.start_chapter is not None else 0,
+                output_format=output_format,
+                cbz_layout=cbz_layout,
+                reading_direction=reading_direction,
+                metadata_language=metadata_language,
+                optimize_mode=optimize_mode,
             )
-        img_urls, title = await fetch_weebcentral_images(str(manga_name))
-        if not img_urls:
-            console.print("[red]No images detected, exiting WeebCentral mode.[/]")
-            sys.exit(1)
-
-        slug, pretty_name = get_slug_and_pretty(title)
-        if not CLEAN_OUTPUT:
-            console.print(
-                f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
-            )
-
-        # Download the images actually extracted from the requested chapter.
-        # Its stable URL id keeps different chapters in separate folders.
-        chapter_id = urlparse(str(manga_name)).path.rstrip("/").rsplit("/", 1)[-1]
-        chapter_folder = os.path.join(pretty_name, sanitize_folder_name(chapter_id))
-        urls_to_download = [(url, chapter_folder) for url in dict.fromkeys(img_urls)]
-        if not urls_to_download:
-            console.print(f"[yellow]No pages found for '{manga_name}'.[/]")
-
-        download_result = await download_all_pages(
-            urls_to_download,
-            max_workers=workers,
-            manga_name=pretty_name,
-            max_retries=max_retries,
-            optimize_mode=optimize_mode,
-        )
-
-        cbz_created_path = None
-        if cbz_flag and not stop_signal and download_result.complete:
-            if os.path.isdir(pretty_name) and any(
-                f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
-            ):
-                # Archive file operations are synchronous — run in a thread
-                # so the event loop is not blocked during CBZ packaging.
-                cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
-                if cbz_created_path and not CLEAN_OUTPUT:
-                    console.print(
-                        f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
-                    )
-            else:
-                if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
-                    )
-
-        # Summary output for clean mode
-        if CLEAN_OUTPUT:
-            total_pages = download_result.successful_pages
-            total_chapters = len(download_result.completed_folders)
-            print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
-        return
-
-    # ---- Webtoons.com case ----
-    if source == "webtoons":
-        if not CLEAN_OUTPUT:
-            console.print(
-                Panel.fit(
-                    "[bold magenta] Entering Webtoons Mode [/]",
-                    border_style="magenta",
-                )
-            )
-        urls_to_download, title = await fetch_webtoons_images(str(manga_name))
-        if not urls_to_download:
-            console.print("[red]No images detected, exiting Webtoons mode.[/]")
-            sys.exit(1)
-
-        # Use the title from the scraper as the folder name (it's already
-        # human-readable: "Some Cool Webtoon").
-        pretty_name = sanitize_folder_name(title)
-        urls_to_download = [
-            (url, os.path.join(pretty_name, folder)) for url, folder in urls_to_download
-        ]
-        if not CLEAN_OUTPUT:
-            console.print(
-                f"[yellow] Starting downloads for: [bold cyan]{pretty_name}[/bold cyan][/]"
-            )
-
-        download_result = await download_all_pages(
-            urls_to_download,
-            max_workers=workers,
-            manga_name=pretty_name,
-            max_retries=max_retries,
-            referer=WEBTOONS_REFERER,  # required — Webtoons CDN enforces anti-hotlink
-            source_type="webtoons",
-            source_url=str(manga_name),
-            source_id=parse_qs(urlparse(str(manga_name)).query).get("title_no", [None])[0],
-            output_path=pretty_name,
-            optimize_mode=optimize_mode,
-        )
-
-        cbz_created_path = None
-        if cbz_flag and not stop_signal and download_result.complete:
-            if os.path.isdir(pretty_name) and any(
-                f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
-            ):
-                cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
-                if cbz_created_path and not CLEAN_OUTPUT:
-                    console.print(
-                        f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
-                    )
-            else:
-                if not CLEAN_OUTPUT:
-                    console.print(
-                        f"[yellow]No downloaded files for '{pretty_name}' — skipping CBZ creation.[/]"
-                    )
-
-        if CLEAN_OUTPUT:
-            total_pages = download_result.successful_pages
-            total_chapters = len(download_result.completed_folders)
-            print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
+        except (OSError, RuntimeError, ValueError) as exc:
+            console.print(f"Download failed: {exc}")
+            raise SystemExit(1) from exc
         return
 
     # ---- Regular direct image source case ----
@@ -644,20 +710,32 @@ async def main():
         source_url=str(manga_name) if str(manga_name).startswith("http") else None,
         output_path=pretty_name,
         optimize_mode=optimize_mode,
+        skip_archived=output_format == "cbz",
     )
 
     # ---- CBZ packaging ----
     cbz_created_path = None
-    if cbz_flag and not stop_signal and download_result.complete:
-        if os.path.isdir(pretty_name) and any(
-            f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
-        ):
+    if output_format and not stop_signal and download_result.complete:
+        if os.path.isdir(pretty_name):
             # Archive file operations are synchronous — run in a thread
             # so the event loop is not blocked during CBZ packaging.
-            cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
+            cbz_created_path = await asyncio.to_thread(
+                _create_selected_output,
+                pretty_name,
+                output_format,
+                **_cbz_options(
+                    "generic",
+                    pretty_name,
+                    str(manga_name) if str(manga_name).startswith("http") else None,
+                    metadata_language,
+                    cbz_layout,
+                    reading_direction,
+                ),
+            )
             if cbz_created_path and not CLEAN_OUTPUT:
                 console.print(
-                    f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
+                    f"[bold green]{output_format.upper()} created successfully:[/] "
+                    f"[cyan]{cbz_created_path}[/]"
                 )
         else:
             if not CLEAN_OUTPUT:

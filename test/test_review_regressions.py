@@ -70,7 +70,7 @@ def test_archive_keeps_folder_with_unarchived_files(tmp_path):
 
     assert chapter.exists()
     with zipfile.ZipFile(archive) as stream:
-        assert stream.namelist() == ["chapter_0001/001.png"]
+        assert stream.namelist() == ["chapter_0001/001.png", "ComicInfo.xml"]
 
 
 @pytest.mark.parametrize("name", ["..", ".", "///", "\x00", "CON"])
@@ -266,6 +266,10 @@ async def test_auto_update_routes_mangadex_from_saved_source(monkeypatch):
         max_retries=3,
         start_chapter=7,
         optimize_mode="off",
+        output_path="Title",
+        cbz_layout="series",
+        reading_direction="auto",
+        metadata_language=None,
     )
     gather.assert_not_awaited()
 
@@ -366,7 +370,7 @@ def test_archive_excludes_pending_and_other_archives(tmp_path):
     (root / ".pending_002.png").write_bytes(b"partial")
     (root / "other.cbz").write_bytes(b"archive")
     with zipfile.ZipFile(cbz.create_cbz_for_all(str(root))) as stream:
-        assert stream.namelist() == ["001.png"]
+        assert stream.namelist() == ["001.png", "ComicInfo.xml"]
     assert (root / ".pending_002.png").exists()
 
 

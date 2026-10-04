@@ -52,7 +52,7 @@ def test_small_mode_keeps_jpeg_name_and_can_be_archived(tmp_path):
     assert page.stat().st_size < original_size
     archive = create_cbz_for_all(str(root))
     with zipfile.ZipFile(archive) as cbz:
-        assert cbz.namelist() == ["Chapter 1/001.jpg"]
+        assert cbz.namelist() == ["Chapter 1/001.jpg", "ComicInfo.xml"]
         assert cbz.getinfo("Chapter 1/001.jpg").compress_type == zipfile.ZIP_DEFLATED
         assert cbz.read("Chapter 1/001.jpg").startswith(b"\xff\xd8")
 
