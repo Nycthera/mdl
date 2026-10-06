@@ -55,9 +55,7 @@ def images_html(module, suffix="page"):
     )
 
 
-async def test_series_discovery_filters_and_preserves_chapter_and_page_order(
-    source, monkeypatch
-):
+async def test_series_discovery_filters_and_preserves_chapter_and_page_order(source, monkeypatch):
     url, html, _, chapter_path = source_fixture(source)
     active = peak = 0
     requested = []
@@ -146,9 +144,7 @@ async def test_empty_series_is_reported_as_discovery_failure(source, monkeypatch
 
 async def test_html_requests_retry_network_errors_and_use_current_timeout(monkeypatch):
     monkeypatch.setattr(html_common.asyncio, "sleep", AsyncMock())
-    monkeypatch.setattr(
-        http, "get_default_timeout", lambda: aiohttp.ClientTimeout(total=7)
-    )
+    monkeypatch.setattr(http, "get_default_timeout", lambda: aiohttp.ClientTimeout(total=7))
     monkeypatch.setattr(html_common, "get_default_timeout", http.get_default_timeout)
 
     class Response:
@@ -280,8 +276,6 @@ async def test_head_probe_checks_redirect_target_before_following():
     )
     assert requested == [source_url, "https://cdn.example/page.png"]
     requested.clear()
-    redirects = [
-        Response(302, f"https://cdn.example/page-{index}.png") for index in range(1, 6)
-    ]
+    redirects = [Response(302, f"https://cdn.example/page-{index}.png") for index in range(1, 6)]
     assert await downloader.url_exists(Session([*redirects, Response(200)]), source_url)
     assert requested[-1] == "https://cdn.example/page-5.png"
