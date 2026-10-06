@@ -7,7 +7,7 @@ import aiohttp
 import pytest
 from bs4 import BeautifulSoup
 
-from src import http
+from src import downloader, http
 from src.scrapers import html_common, manganato, mangapill
 
 
@@ -204,3 +204,84 @@ def test_mangapill_images_reject_private_ip_urls():
         "html.parser",
     )
     assert mangapill._extract_chapter_images(soup) == ["https://cdn.example/page.jpg"]
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "localhost",
+        "foo.localhost",
+        "127.1",
+        "2130706433",
+        "0x7f000001",
+        "127。0。0。1",
+        "127．0．0．1",
+        "127｡0｡0｡1",
+        "①②⑦。⓪。⓪。①",
+    ],
+)
+def test_url_validation_rejects_localhost_aliases(host):
+    with pytest.raises(ValueError):
+        http.validate_http_url(f"http://{host}/private")
+    assert http.validate_http_url("https://cdn.example/page.jpg") == "https://cdn.example/page.jpg"
+
+
+@pytest.mark.asyncio
+async def test_public_address_resolver_rejects_private_dns_answers():
+    class Resolver:
+        host = "10.0.0.1"
+
+        async def resolve(self, host, port, family):
+            return [{"host": self.host}]
+
+        async def close(self):
+            pass
+
+    upstream = Resolver()
+    resolver = http.PublicAddressResolver(upstream)
+    with pytest.raises(OSError, match="Private or non-routable"):
+        await resolver.resolve("cdn.example", 443)
+    upstream.host = "8.8.8.8"
+    assert (await resolver.resolve("cdn.example", 443))[0]["host"] == "8.8.8.8"
+
+
+@pytest.mark.asyncio
+async def test_head_probe_checks_redirect_target_before_following():
+    requested = []
+
+    class Response:
+        def __init__(self, status, location=None):
+            self.status = status
+            self.headers = {"Location": location} if location else {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+    class Session:
+        def __init__(self, responses):
+            self.responses = iter(responses)
+
+        def head(self, url, **kwargs):
+            requested.append(url)
+            assert kwargs["allow_redirects"] is False
+            return next(self.responses)
+
+    source_url = "https://scans.example/page.png"
+    assert not await downloader.url_exists(
+        Session([Response(302, "http://127.0.0.1/private")]), source_url
+    )
+    assert requested == [source_url]
+    requested.clear()
+    assert await downloader.url_exists(
+        Session([Response(302, "https://cdn.example/page.png"), Response(200)]), source_url
+    )
+    assert requested == [source_url, "https://cdn.example/page.png"]
+    requested.clear()
+    redirects = [
+        Response(302, f"https://cdn.example/page-{index}.png") for index in range(1, 6)
+    ]
+    assert await downloader.url_exists(Session([*redirects, Response(200)]), source_url)
+    assert requested[-1] == "https://cdn.example/page-5.png"

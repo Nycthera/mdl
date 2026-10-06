@@ -26,6 +26,31 @@ async def test_unsafe_image_url_does_not_complete_chapter(tmp_path):
     assert not result.complete
 
 
+@pytest.mark.asyncio
+async def test_private_dns_answer_cannot_complete_image_download(tmp_path, monkeypatch):
+    resolved = []
+
+    class Resolver:
+        async def resolve(self, host, port, family):
+            resolved.append(host)
+            return [{"host": "127.0.0.1"}]
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(http.aiohttp, "DefaultResolver", Resolver)
+    result = await downloader.download_all_pages(
+        [("http://images.example.test/page.jpg", str(tmp_path / "chapter_1"))],
+        max_retries=1,
+        track_to_db=False,
+        track_history=False,
+    )
+    assert resolved == ["images.example.test"]
+    assert result.successful_pages == 0
+    assert not result.complete
+    assert not (tmp_path / "chapter_1" / "page.jpg").exists()
+
+
 def test_archive_update_preserves_previous_chapters(tmp_path):
     root = tmp_path / "Title"
     chapter = root / "chapter_0001"

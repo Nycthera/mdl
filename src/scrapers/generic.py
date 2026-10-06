@@ -6,6 +6,7 @@ import aiohttp
 from rich.console import Console
 
 from src.downloader import url_exists
+from src.http import PublicAddressResolver
 from src.scrapers import _collect_chapter_urls_for_download
 from src.scrapers import set_clean_output as set_scraper_clean_output
 from src.utils import sanitize_folder_name
@@ -95,6 +96,7 @@ async def gather_all_urls(
         limit_per_host=max(1, workers),
         keepalive_timeout=30,
         ttl_dns_cache=300,
+        resolver=PublicAddressResolver(),
     )
     async with aiohttp.ClientSession(connector=connector) as session:
         chapter = start_chapter

@@ -37,11 +37,13 @@ from src.database.manga_db import (
 )
 from src.http import (
     HEAD_TIMEOUT,
+    PublicAddressResolver,
     classify_failure,
     compute_backoff,
     download_image_streaming,
     get_default_timeout,
     get_host_cap,
+    redirect_target,
     validate_http_url,
 )
 from src.utils import Colors, _cancel_pending_tasks, _loop_time, image_filename
@@ -79,14 +81,20 @@ def _is_stopped() -> bool:
 async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
     """Check if a URL exists with a HEAD request."""
     try:
-        async with session.head(
-            url,
-            allow_redirects=True,
-            timeout=HEAD_TIMEOUT,
-        ) as response:
-            return response.status == 200
-    except (aiohttp.ClientError, TimeoutError):
+        current_url = validate_http_url(url)
+        for _ in range(10):
+            async with session.head(
+                current_url,
+                allow_redirects=False,
+                timeout=HEAD_TIMEOUT,
+            ) as response:
+                if response.status in {301, 302, 303, 307, 308}:
+                    current_url = redirect_target(current_url, response.headers.get("Location"))
+                    continue
+                return response.status == 200
+    except (aiohttp.ClientError, TimeoutError, ValueError, OSError):
         return False
+    return False
 
 
 def _write_file_sync(filepath: str, data: bytes) -> None:
@@ -284,6 +292,7 @@ def _build_connector(max_workers: int) -> aiohttp.TCPConnector:
         keepalive_timeout=30,
         ttl_dns_cache=300,
         force_close=False,
+        resolver=PublicAddressResolver(),
     )
 
 
