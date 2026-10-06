@@ -238,6 +238,8 @@ def _download_failed(result: str) -> bool:
         "failed to download" in lowered
         or "unexpected error" in lowered
         or "download interrupted" in lowered
+        or "unsafe url" in lowered
+        or "unsafe redirect" in lowered
     )
 
 

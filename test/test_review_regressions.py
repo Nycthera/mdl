@@ -12,6 +12,20 @@ from src.scrapers import _collect_chapter_urls_for_download, mangadex
 from src.utils import sanitize_folder_name
 
 
+@pytest.mark.asyncio
+async def test_unsafe_image_url_does_not_complete_chapter(tmp_path):
+    folder = tmp_path / "chapter_1"
+    result = await downloader.download_all_pages(
+        [("http://127.0.0.1/private.jpg", str(folder))],
+        track_to_db=False,
+        track_history=False,
+    )
+    assert result.successful_pages == 0
+    assert result.total_pages == 1
+    assert result.completed_folders == []
+    assert not result.complete
+
+
 def test_archive_update_preserves_previous_chapters(tmp_path):
     root = tmp_path / "Title"
     chapter = root / "chapter_0001"

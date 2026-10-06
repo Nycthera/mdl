@@ -153,14 +153,16 @@ async def test_html_requests_retry_network_errors_and_use_current_timeout(monkey
 
     class Response:
         status = 200
+        closed = False
 
         async def __aenter__(self):
             return self
 
         async def __aexit__(self, *args):
-            pass
+            self.closed = True
 
         async def text(self):
+            assert not self.closed
             return "<h1>Works</h1>"
 
     class Session:

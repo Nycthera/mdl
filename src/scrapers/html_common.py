@@ -22,25 +22,26 @@ async def fetch_html(session, url: str, *, max_retries: int = 5) -> str:
                 async with session.get(
                     current_url, timeout=get_default_timeout(), allow_redirects=False
                 ) as response:
-                    if response.status not in {301, 302, 303, 307, 308}:
-                        break
-                    current_url = redirect_target(
-                        current_url, response.headers.get("Location")
+                    if response.status in {301, 302, 303, 307, 308}:
+                        current_url = redirect_target(
+                            current_url, response.headers.get("Location")
+                        )
+                        continue
+                    if response.status < 400:
+                        return await response.text()
+                    status = response.status
+                    body = (
+                        await response.content.read(4096)
+                        if status in (403, 503)
+                        else b""
                     )
+                    break
             else:
                 raise RuntimeError(f"Too many redirects fetching {url}")
-            if response.status >= 400:
-                body = (
-                    await response.content.read(4096)
-                    if response.status in (403, 503)
-                    else b""
-                )
-                failure = classify_failure(response.status, body_snippet=body)
-                if failure == "permanent" or attempt == max_retries:
-                    raise RuntimeError(f"HTTP {response.status} fetching {current_url}")
-                await asyncio.sleep(compute_backoff(failure, attempt))
-                continue
-            return await response.text()
+            failure = classify_failure(status, body_snippet=body)
+            if failure == "permanent" or attempt == max_retries:
+                raise RuntimeError(f"HTTP {status} fetching {current_url}")
+            await asyncio.sleep(compute_backoff(failure, attempt))
         except ValueError as exc:
             raise RuntimeError(f"Unsafe URL fetching {url}: {exc}") from exc
         except (TimeoutError, aiohttp.ClientError) as exc:
