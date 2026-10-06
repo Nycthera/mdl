@@ -1,6 +1,6 @@
 [project]
 name = "mdl"
-version = "3.5.1"
+version = "3.6.0"
 description = "A multi-source manga downloader"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -8,9 +8,12 @@ license = "GPL-3.0-only"
 authors = [{ name = "Nycthera" }]
 dependencies = [
     "aiohttp>=3.13.0",
+    "beautifulsoup4>=4.15.0",
     "playwright>=1.58.0",
     "playwright-stealth>=2.0.2",
+    "pillow>=11.0.0",
     "rich>=13.9.0",
+    "yarl>=1.17.0",
 ]
 
 [dependency-groups]

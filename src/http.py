@@ -24,14 +24,17 @@ Designed as a drop-in helper. Existing scrapers can adopt it incrementally.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import random
+import socket
 import threading
 from collections.abc import Callable
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import aiohttp
+from yarl import URL
 
 from src.utils import image_filename
 
@@ -47,8 +50,64 @@ DEFAULT_CONNECTOR_KWARGS = dict(
     force_close=False,  # keep connections alive (HTTP keep-alive)
 )
 
-DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
+DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
+    total=30, connect=10, sock_connect=10, sock_read=20
+)
 HEAD_TIMEOUT = aiohttp.ClientTimeout(total=5, connect=5, sock_read=5)
+
+
+def validate_http_url(url: str, *, allowed_hosts: tuple[str, ...] = ()) -> str:
+    """Validate a URL before making a request or following a redirect."""
+    # aiohttp uses yarl to parse request URLs. Validate that same host spelling,
+    # including IDNA and Unicode-dot normalization, before it reaches the connector.
+    parsed = URL(url)
+    hostname = (parsed.raw_host or "").lower().rstrip(".")
+    if parsed.scheme not in {"http", "https"} or not hostname:
+        raise ValueError(f"Unsupported or invalid URL: {url}")
+    if parsed.user is not None or parsed.password is not None:
+        raise ValueError(f"Credentials are not allowed in URL: {url}")
+    if hostname == "localhost" or hostname.endswith(".localhost"):
+        raise ValueError(f"Local URL rejected: {url}")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        try:
+            # The OS resolver also accepts shortened, octal and hexadecimal IPv4.
+            address = ipaddress.ip_address(socket.inet_aton(hostname))
+        except OSError:
+            address = None
+    if address is not None and not address.is_global:
+        raise ValueError(f"Private or non-routable URL rejected: {url}")
+    if allowed_hosts and not any(
+        hostname == host or hostname.endswith(f".{host}") for host in allowed_hosts
+    ):
+        raise ValueError(f"Unexpected host in URL: {url}")
+    return url
+
+
+class PublicAddressResolver(aiohttp.abc.AbstractResolver):
+    """Reject private DNS answers before aiohttp uses them for a connection."""
+
+    def __init__(self, resolver: aiohttp.abc.AbstractResolver | None = None) -> None:
+        self._resolver = resolver or aiohttp.DefaultResolver()
+
+    async def resolve(self, host: str, port: int = 0, family: socket.AddressFamily = socket.AF_INET):
+        addresses = await self._resolver.resolve(host, port, family)
+        if not addresses or any(
+            not ipaddress.ip_address(address["host"]).is_global for address in addresses
+        ):
+            raise OSError(f"Private or non-routable address rejected for {host}")
+        return addresses
+
+    async def close(self) -> None:
+        await self._resolver.close()
+
+
+def redirect_target(url: str, location: str | None) -> str:
+    """Resolve and validate a redirect target relative to the current URL."""
+    if not location:
+        raise ValueError(f"Redirect from {url} has no destination")
+    return validate_http_url(urljoin(url, location))
 
 
 def get_default_timeout() -> aiohttp.ClientTimeout:
@@ -97,6 +156,7 @@ def build_session(
     # Cap limit_per_host to limit so we never deadlock on a single host.
     if kwargs["limit_per_host"] > kwargs["limit"]:
         kwargs["limit_per_host"] = kwargs["limit"]
+    kwargs["resolver"] = PublicAddressResolver(kwargs.get("resolver"))
     connector = aiohttp.TCPConnector(**kwargs)
     return aiohttp.ClientSession(
         connector=connector,
@@ -144,7 +204,8 @@ def classify_failure(
             if isinstance(exc, asyncio.TimeoutError):
                 return "retryable"
             if isinstance(
-                exc, (aiohttp.ClientConnectorDNSError, aiohttp.ClientProxyConnectionError)
+                exc,
+                (aiohttp.ClientConnectorDNSError, aiohttp.ClientProxyConnectionError),
             ):
                 return "permanent"
             if isinstance(exc, aiohttp.ClientError):
@@ -243,6 +304,16 @@ class HostConcurrencyCap:
             cap = self._caps.get(host)
         return min(b, cap) if cap is not None else b
 
+    def set_baseline(self, baseline: int) -> None:
+        """Update the uncapped limit and clamp recovering hosts to it."""
+        baseline = max(1, int(baseline))
+        with self._lock:
+            self._baseline = baseline
+            for host, cap in list(self._caps.items()):
+                if cap >= baseline:
+                    self._caps.pop(host, None)
+                    self._streaks.pop(host, None)
+
     def record_failure(self, url: str, cls: str) -> None:
         """Multiplicative decrease on rate_limit; -1 on retryable; no-op otherwise."""
         host = self.host_of(url)
@@ -339,6 +410,10 @@ async def download_image_streaming(
     """
     if stop_check is not None and stop_check():
         return False, "interrupted"
+    try:
+        validate_http_url(url)
+    except ValueError as exc:
+        return False, f"unsafe-url:{exc}"
 
     os.makedirs(folder, exist_ok=True)
     filename = image_filename(url)
@@ -369,10 +444,19 @@ async def download_image_streaming(
                 url,
                 timeout=timeout or DEFAULT_TIMEOUT,
                 headers=headers or None,
+                allow_redirects=False,
             ) as r:
+                if r.status in {301, 302, 303, 307, 308}:
+                    try:
+                        url = redirect_target(url, r.headers.get("Location"))
+                    except ValueError as exc:
+                        return False, f"unsafe-redirect:{filename}:{exc}"
+                    continue
                 if r.status >= 400:
                     # Sniff body for CF classification (cap at 4 KB to bound cost).
-                    body_snippet = await r.content.read(4096) if r.status in (403, 503) else b""
+                    body_snippet = (
+                        await r.content.read(4096) if r.status in (403, 503) else b""
+                    )
                     cls = classify_failure(r.status, body_snippet=body_snippet)
                     last_cls = cls
                     if on_failure_class:
@@ -397,7 +481,9 @@ async def download_image_streaming(
                     last_cls = "retryable"
                     if attempt == max_retries:
                         return False, f"empty-response:{filename}"
-                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_base))
+                    await asyncio.sleep(
+                        compute_backoff("retryable", attempt, backoff_base)
+                    )
                     continue
 
                 # Atomic write: pending tempfile -> os.replace to final path.
@@ -469,7 +555,9 @@ async def make_request(
             ) as r:
                 last_status = r.status
                 if r.status >= 400:
-                    body_snippet = await r.content.read(4096) if r.status in (403, 503) else b""
+                    body_snippet = (
+                        await r.content.read(4096) if r.status in (403, 503) else b""
+                    )
                     cls = classify_failure(r.status, body_snippet=body_snippet)
                     _host_cap.record_failure(url, cls)
                     if cls == "permanent" or attempt == max_retries:

@@ -1,6 +1,6 @@
 # DB Auto-Update Guide
 
-This guide explains how to use the database-backed update workflow.
+This guide explains how to use the source-aware database-backed update workflow.
 
 ## What It Does
 
@@ -17,8 +17,57 @@ For each tracked row in `manga_data`, MDL:
 1. Reads `manga_name` and `latest_chapter_local`
 2. Picks a safe resume chapter (integer part of latest local chapter)
 3. Scans for available pages from that point onward
-4. Downloads only missing files
+4. Downloads missing files, reusing pages already in CBZ archives when CBZ output is selected
 5. Updates DB metadata (`date_last_checked`, latest chapters)
+
+New downloads store their source type, original URL, source ID, language, and output
+folder. Auto-update routes MangaDex, WeebCentral, Webtoons, MangaPill, and Manganato records back through
+their matching scraper. Migrated legacy rows remain `generic` because their original
+source cannot be recovered safely.
+
+## Library Commands
+
+```bash
+uv run python main.py library list
+uv run python main.py library status "One Piece"
+uv run python main.py library update "One Piece" --workers 10
+uv run python main.py library update id:3 --cbz-layout chapter
+```
+
+`list` and `status` show saved information without querying a source. Status includes
+the saved URL and folder, highest completed local chapter, last check time, and most
+recent download run's page counts. A saved run is not a live source check or an
+integrity check; use `library update` and `--verify` for those operations.
+
+Titles match exactly, ignoring case. When the same title is tracked from multiple
+sources, use its `id:NUMBER` from `library list`. No source is selected automatically
+for an ambiguous title. Numeric manga titles such as `86` remain title searches.
+
+`update` uses the selected row's source, language, and saved output directory, even
+when invoked from another working directory. Update commands return a nonzero exit
+code for failed or interrupted updates. Full-library updates continue to the next
+title after a source error and report the failed count.
+
+CBZ output defaults to one combined book with ComicInfo metadata. Use
+`--cbz-layout chapter` for separate chapter archives, or save `"cbz_layout": "chapter"`
+in the config. Combined mode merges existing MDL chapter archives and removes them
+after validating the book. Empty chapter folders are cleaned up on repeat downloads.
+Switching to chapter mode retains existing combined archives. Both layouts support
+verification and repair.
+
+Each run also records page-level outcomes. Inspect them with:
+
+```bash
+uv run python main.py --download-history
+uv run python main.py --download-history "One Piece"
+```
+
+Verify or repair a library folder with:
+
+```bash
+uv run python main.py --verify "One Piece"
+uv run python main.py --repair "One Piece"
+```
 
 ## Database Path
 
@@ -95,9 +144,12 @@ MANGA_DB_VERBOSE=1 uv run python main.py --auto-update-db
 
 ## Notes
 
-- The current schema tracks manga by `manga_name` only, without source URLs or IDs.
-- Auto-update probes the generic direct-image hosts, including when cached chapter
-  numbers match. It cannot reliably resume MangaDex or browser-source titles from
-  this schema; rerun their original source URL to check for updates.
+- The database uses WAL mode so update reads do not block completed-download writes.
+  Writers wait up to 10 seconds for a busy database instead of failing immediately.
+- Schema migrations are transactional and versioned. Manga names are trimmed and
+  matched case-insensitively, preventing duplicate rows such as `One Piece` and
+  `one piece` while retaining the highest recorded chapter values.
+- Legacy records without source metadata continue using generic direct-image probing.
+- Browser-source updates are limited by what each scraper can discover from its saved URL.
 - For best accuracy, keep names consistent with download folder naming.
-- MangaDex flow performs one consolidated DB write at the end of the manga run.
+- MangaDex records page history per chapter and consolidates chapter progress at the end.

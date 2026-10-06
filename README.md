@@ -25,25 +25,27 @@
 - **🔗 Multi-Source Support**
   - MangaDex official API (primary, most reliable)
   - WeebCentral browser automation fallback
+  - Webtoons episode/series URLs
+  - MangaPill and Manganato-family chapter/series URLs
   - Direct image hosting support (LaStation, Lowee, Planeptune)
-  
 - **⚡ Performance**
   - Async/await concurrency with configurable workers (1-50)
-  - Rate limiting with exponential backoff
+  - Adaptive per-host concurrency with exponential backoff
   - Connection pooling for optimized network usage
+  - MangaDex chapter-manifest prefetching
   - Pages/second performance metrics
-  
 - **📦 Output Formats**
-  - CBZ (Comic Book Archive) generation
+  - One combined CBZ book per series with `ComicInfo.xml` metadata (separate chapter files optional)
   - Organized folder structure per chapter
   - Clean JSON configuration management
-  
 - **🛡️ Reliability**
   - Automatic retry with exponential backoff
   - Graceful error handling
   - Support interruption handling (Ctrl+C)
   - Cross-platform compatibility (Windows, macOS, Linux)
-  
+  - Source-aware SQLite tracking with page-level download history
+  - Missing/corrupt image verification and URL-backed repair
+  - Library listing, saved status, and updates for a selected title or source
 - **👁️ User Experience**
   - Real-time progress bars with ETA
   - Rich terminal UI with color output
@@ -135,6 +137,22 @@ uv run python main.py -M "naruto" --workers 20 --max-pages 150
 # Download with CBZ archive creation
 uv run python main.py -M "attack-on-titan" --cbz
 
+# Optionally create separate chapter archives instead of the default combined book
+uv run python main.py -M "attack-on-titan" --cbz-layout chapter
+
+# Set language and reading direction in CBZ metadata
+uv run python main.py -M "some-title" --metadata-language en --reading-direction rtl
+
+# Export as an EPUB or PDF instead of CBZ
+uv run python main.py -M "attack-on-titan" --output-format epub
+uv run python main.py -M "attack-on-titan" --output-format pdf
+
+# Optimize each completed page while the next pages download, then create a CBZ
+uv run python main.py -M "attack-on-titan" --optimize-images
+
+# Choose an optimization mode
+uv run python main.py -M "attack-on-titan" --optimize-images small
+
 # Keep folders without creating an archive
 uv run python main.py -M "attack-on-titan" --no-cbz
 
@@ -166,8 +184,26 @@ uv sync --locked
 # Check all manga tracked in SQLite and download new chapters
 uv run python main.py --auto-update-db
 
+# List saved titles and inspect one title's status (no source requests)
+uv run python main.py library list
+uv run python main.py library status "One Piece"
+
+# Update one title using its saved source and output folder
+uv run python main.py library update "One Piece" --workers 10
+
+# Use the ID shown by library list when a title has multiple sources
+uv run python main.py library update id:3
+
 # DB auto-update with developer debug logs
 uv run python main.py --auto-update-db --dev
+
+# Inspect recent download runs, optionally for one title
+uv run python main.py --download-history
+uv run python main.py --download-history "One Piece"
+
+# Check a library folder and repair pages using stored source URLs
+uv run python main.py --verify "One Piece"
+uv run python main.py --repair "One Piece"
 
 # Show credits and attribution
 uv run python main.py --credits
@@ -188,9 +224,67 @@ Detailed guide: [DB_AUTO_UPDATE.md](DB_AUTO_UPDATE.md)
 
 ### Archive safety
 
-CBZ updates preserve chapters already in the existing archive and replace the archive
-only after the new file is written successfully. Source chapter folders are retained
-for resuming downloads. Incomplete download batches are not automatically packaged.
+CBZ output defaults to one combined book, for example `One Piece/One Piece.cbz`,
+with all chapters in reading order. Use `--cbz-layout chapter` for separate files
+such as `One Piece/chapter_0001.cbz`, or `--cbz-layout series` to explicitly select
+the combined book. Set `"cbz_layout": "series"` or `"cbz_layout": "chapter"` in
+the config to save a preference; an explicit CLI option takes precedence.
+
+Both layouts include `ComicInfo.xml` with the series title, page count, source URL,
+language where known, and reading direction. Separate chapter files also include
+the chapter title/number where known. MangaDex supplies chapter titles and language;
+Webtoons supplies language from its URL. Use `--metadata-language CODE` to supply or
+override the metadata language. `--reading-direction auto` (the default) uses left
+to right for Webtoons and right to left for manga; `ltr` and `rtl` override it.
+These fields follow [ComicInfo](https://anansi-project.github.io/docs/comicinfo/documentation)
+and can be imported by [Komga](https://komga.org/docs/guides/scan-analysis-refresh/).
+
+Combined-book mode merges existing MDL chapter CBZs into the book without downloading
+their pages again. Chapter archives are removed only after the book is written and
+checked; their metadata is retained inside the book's chapter folders. Switching to
+chapter mode retains any existing combined book. During CBZ downloads, MDL recognizes
+pages in either layout and reuses them.
+Use `--verify` or `--repair` to check or repair archived pages.
+
+Updates preserve pages already in an archive and replace that archive only after the
+new file is written and checked. Archived image folders and empty chapter folders
+are then deleted. Page discovery does not create empty folders on repeat downloads.
+Folders with pending or excluded files are kept. Incomplete download batches are not
+automatically packaged. Use `--no-cbz` to keep the image folders.
+
+`--output-format` accepts `cbz` (the default), `epub`, or `pdf`. EPUB files contain
+one fixed-layout XHTML page per downloaded image and group pages by chapter folder.
+PDF files contain one image per page in download order. After a successful CBZ, EPUB,
+or PDF export, source image folders are removed only when every file in the folder was
+included; folders containing pending, excluded, or symlinked files are retained. Use
+`--no-cbz` to keep image folders without creating an output file. The `output_format`
+configuration setting accepts the same three values.
+
+`--optimize-images` uses `balanced` by default. Choose `lossless` to recompress PNGs
+without changing their pixels, `balanced` for moderate JPEG/WebP quality and PNG
+palette reduction, or `small` for stronger compression. `off` disables optimization.
+The CLI keeps each page's original image format and filename, and replaces a page only
+when the result is smaller. JPEGs remain unchanged in lossless mode. Optimization runs
+in parallel with downloads; CBZ creation starts after both have finished. Pillow is
+installed with the project dependencies.
+
+### MangaPill and Manganato
+
+Pass a chapter or series URL using `-M`. Series downloads discover chapter links and
+fetch chapter image lists with bounded concurrency. `--start-chapter` can skip earlier
+chapters in these series; chapter URLs download the requested chapter. The original
+URL, output folder, and page history are saved for library updates and repair.
+
+```bash
+uv run python main.py -M "https://mangapill.com/manga/<id>/<slug>"
+uv run python main.py -M "https://www.natomanga.com/manga/<slug>" --start-chapter 10
+```
+
+Manganato-family host names, including legacy redirect domains, are listed in
+`src/scrapers/manganato.py`. Availability and HTML templates vary by domain. A blocked
+request or failed chapter discovery is reported as an error; incomplete discovery
+does not advance download progress. Use a series URL when you want subsequent
+library updates to discover newly published chapters.
 
 ### Configuration
 
@@ -200,15 +294,18 @@ Example config:
 
 ```json
 {
-    "manga_name": "one-piece",
-    "start_chapter": 1,
-    "start_page": 1,
-    "max_pages": 50,
-    "workers": 10,
-    "cbz": true,
-    "clean_output": false,
-    "md_language": "en",
-    "credits_shown": true
+  "manga_name": "one-piece",
+  "start_chapter": 1,
+  "start_page": 1,
+  "max_pages": 50,
+  "workers": 10,
+  "cbz": true,
+  "output_format": "cbz",
+  "cbz_layout": "series",
+  "reading_direction": "auto",
+  "clean_output": false,
+  "md_language": "en",
+  "credits_shown": true
 }
 ```
 
@@ -241,21 +338,21 @@ src/
 
 ### Performance Characteristics
 
-| Metric | Value | Notes |
-| -------- | ------- | ------- |
-| **Concurrency** | 1-50 workers | Configurable, default 10 |
-| **Rate Limiting** | 5 req/sec | Adaptive, respects server limits |
-| **Retry Logic** | 5 attempts | Exponential backoff (1s-32s) |
-| **CBZ Creation** | Streaming | Memory-efficient archive generation |
-| **Memory Usage** | ~50-100 MB | Depends on worker count |
+| Metric            | Value        | Notes                               |
+| ----------------- | ------------ | ----------------------------------- |
+| **Concurrency**   | 1-50 workers | Configurable, default 10            |
+| **Rate Limiting** | 5 req/sec    | Adaptive, respects server limits    |
+| **Retry Logic**   | 5 attempts   | Exponential backoff (1s-32s)        |
+| **CBZ Creation**  | Streaming    | Memory-efficient archive generation |
+| **Memory Usage**  | ~50-100 MB   | Depends on worker count             |
 
 ### Data Sources
 
-| Source | Priority | Speed | Reliability | Notes |
-| -------- | ---------- | ------- | -------------- | ------- |
-| MangaDex API | 1 | Fast | Very High | Official, rate-limited |
-| LaStation | 2 | Fast | High | Direct hosting |
-| WeebCentral | 3 | Slow | Medium | Browser automation |
+| Source       | Priority | Speed | Reliability | Notes                  |
+| ------------ | -------- | ----- | ----------- | ---------------------- |
+| MangaDex API | 1        | Fast  | Very High   | Official, rate-limited |
+| LaStation    | 2        | Fast  | High        | Direct hosting         |
+| WeebCentral  | 3        | Slow  | Medium      | Browser automation     |
 
 ## 📦 Dependencies
 
@@ -271,7 +368,7 @@ Runtime dependencies are declared in `pyproject.toml` and resolved exactly in
 
 ### Publishing a release
 
-Set matching versions in [src/__init__.py](src/__init__.py) and `pyproject.toml`,
+Set matching versions in [src/**init**.py](src/__init__.py) and `pyproject.toml`,
 run `uv lock`, and write `release-notes/vX.Y.Z.md`. Commit the changes and push
 the matching `v` tag. For example, after setting the version to `3.5.1`:
 
