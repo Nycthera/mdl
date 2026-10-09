@@ -297,7 +297,7 @@ wheels = [
 
 [[package]]
 name = "mdl"
-version = "3.6.0"
+version = "3.6.2"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
