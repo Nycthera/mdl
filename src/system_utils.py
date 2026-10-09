@@ -52,6 +52,12 @@ def credits(show: bool = False) -> list[dict[str, str]]:
             "description": "Browser automation used to capture dynamic image URLs.",
             "category": "Library",
         },
+        {
+            "name": "Nycthera",
+            "url": "https://github.com/Nycthera/mdl",
+            "description": "Creator of MDL, the Manga Downloader and Library. (aka me)",
+            "category": "Person",
+        },
     ]
 
     if show:
@@ -69,6 +75,7 @@ def credits(show: bool = False) -> list[dict[str, str]]:
                     item["url"],
                 )
             console.print(Panel.fit(table, border_style="cyan"))
+            console.print("[green]Thank you to all contributors and supporters![/]")
         else:
             # Fallback plain-text credits when Rich is unavailable.
             console.print("Credits:")
@@ -76,6 +83,7 @@ def credits(show: bool = False) -> list[dict[str, str]]:
                 console.print(
                     f"- {item['name']} ({item['category']}): {item['description']} [{item['url']}]"
                 )
+            console.print("[green]Thank you to all contributors and supporters![/]")
 
     return entries
 
@@ -96,14 +104,18 @@ def update() -> None:
     """Synchronize the locked project environment with uv."""
     project_root = _resolve_project_root()
     if shutil.which("uv") is None:
-        console.print("[red]uv is required. Install it from https://docs.astral.sh/uv/[/]")
+        console.print(
+            "[red]uv is required. Install it from https://docs.astral.sh/uv/[/]"
+        )
         return
 
     console.print(f"[cyan]Syncing dependencies in {project_root}...[/]")
     try:
         subprocess.run(["uv", "sync", "--locked"], cwd=project_root, check=True)
     except subprocess.CalledProcessError as exc:
-        console.print(f"[red]Dependency sync failed with exit code {exc.returncode}.[/]")
+        console.print(
+            f"[red]Dependency sync failed with exit code {exc.returncode}.[/]"
+        )
         return
 
     console.print("[green]Dependencies are synchronized.[/]")
