@@ -13,32 +13,32 @@ Development dependencies are pytest, pytest-asyncio, and Ruff. Exact versions ar
 resolved in `uv.lock`; use `uv sync --locked` to create the environment. Chromium is
 needed for browser sources and can be installed with `uv run playwright install chromium`.
 
-| File | Responsibility |
-| --- | --- |
-| `main.py` | CLI orchestration, source routing, global output/stop state, summaries, DB auto-update |
-| `src/cli.py` | Arguments and numeric CLI validation |
-| `src/config.py` | Configuration defaults, validation, atomic saves |
-| `src/downloader.py` | Concurrent image downloads, retry handling, batch results, progress, DB tracking |
-| `src/http.py` | Shared timeouts, session builder, failure classification, backoff, HTTP helpers |
-| `src/rate_limiter.py` | Async API request throttling |
-| `src/cbz.py` | Combined books and optional chapter CBZs with ComicInfo, archive indexing and atomic updates |
-| `src/library.py` | Saved library list/status views |
-| `src/utils.py` | Title/filename sanitization, slug handling, cancellation helpers |
-| `src/database/manga_db.py` | Source-aware SQLite library, run/page history, migrations |
-| `src/verification.py` | Dependency-free image integrity checks and history-backed repair |
-| `src/scrapers/__init__.py` | Direct-host page probing and mirror selection |
-| `src/scrapers/generic.py` | Integer/decimal chapter discovery on direct image hosts |
-| `src/scrapers/mangadex.py` | MangaDex metadata, chapter list, image URLs, downloads |
-| `src/scrapers/weebcentral.py` | Browser extraction of image URLs and title |
-| `src/scrapers/webtoons.py` | Browser extraction of episode links/images and episode folder names |
-| `src/scrapers/mangapill.py` | HTML chapter/series extraction for MangaPill |
-| `src/scrapers/manganato.py` | HTML chapter/series extraction for Manganato-family hosts |
-| `src/scrapers/html_common.py` | Bounded concurrent chapter discovery, retries and cancellation cleanup |
-| `src/system_utils.py` | Dependency update command and credits |
-| `install_single.py` | Single-file builder and macOS/Linux command installation |
-| `scripts/bundle.py` | CLI wrapper around the module-preserving installation builder |
-| `scripts/release.py` | Version checks, release assets, isolated executable checks, checksums |
-| `test/` | Core, regression, standalone installation, and release tests |
+| File                          | Responsibility                                                                               |
+| ----------------------------- | -------------------------------------------------------------------------------------------- |
+| `main.py`                     | CLI orchestration, source routing, global output/stop state, summaries, DB auto-update       |
+| `src/cli.py`                  | Arguments and numeric CLI validation                                                         |
+| `src/config.py`               | Configuration defaults, validation, atomic saves                                             |
+| `src/downloader.py`           | Concurrent image downloads, retry handling, batch results, progress, DB tracking             |
+| `src/http.py`                 | Shared timeouts, session builder, failure classification, backoff, HTTP helpers              |
+| `src/rate_limiter.py`         | Async API request throttling                                                                 |
+| `src/cbz.py`                  | Combined books and optional chapter CBZs with ComicInfo, archive indexing and atomic updates |
+| `src/library.py`              | Saved library list/status views                                                              |
+| `src/utils.py`                | Title/filename sanitization, slug handling, cancellation helpers                             |
+| `src/database/manga_db.py`    | Source-aware SQLite library, run/page history, migrations                                    |
+| `src/verification.py`         | Dependency-free image integrity checks and history-backed repair                             |
+| `src/scrapers/__init__.py`    | Direct-host page probing and mirror selection                                                |
+| `src/scrapers/generic.py`     | Integer/decimal chapter discovery on direct image hosts                                      |
+| `src/scrapers/mangadex.py`    | MangaDex metadata, chapter list, image URLs, downloads                                       |
+| `src/scrapers/weebcentral.py` | Browser extraction of image URLs and title                                                   |
+| `src/scrapers/webtoons.py`    | Browser extraction of episode links/images and episode folder names                          |
+| `src/scrapers/mangapill.py`   | HTML chapter/series extraction for MangaPill                                                 |
+| `src/scrapers/manganato.py`   | HTML chapter/series extraction for Manganato-family hosts                                    |
+| `src/scrapers/html_common.py` | Bounded concurrent chapter discovery, retries and cancellation cleanup                       |
+| `src/system_utils.py`         | Dependency update command and credits                                                        |
+| `install_single.py`           | Single-file builder and macOS/Linux command installation                                     |
+| `scripts/bundle.py`           | CLI wrapper around the module-preserving installation builder                                |
+| `scripts/release.py`          | Version checks, release assets, isolated executable checks, checksums                        |
+| `test/`                       | Core, regression, standalone installation, and release tests                                 |
 
 Source routing matches parsed hostnames against known domains and their subdomains.
 MangaDex title URLs use the API. WeebCentral URLs download the images extracted from

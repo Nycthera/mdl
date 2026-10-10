@@ -22,8 +22,16 @@ def test_verify_library_reports_corrupt_and_missing_pages(tmp_path, monkeypatch)
         verification,
         "get_latest_page_records",
         lambda _: [
-            {"file_path": str(good), "url": "https://cdn/001.jpg", "folder": str(chapter)},
-            {"file_path": str(bad), "url": "https://cdn/002.png", "folder": str(chapter)},
+            {
+                "file_path": str(good),
+                "url": "https://cdn/001.jpg",
+                "folder": str(chapter),
+            },
+            {
+                "file_path": str(bad),
+                "url": "https://cdn/002.png",
+                "folder": str(chapter),
+            },
             {
                 "file_path": str(missing),
                 "url": "https://cdn/003.jpg",
@@ -56,7 +64,13 @@ def test_verify_library_accepts_pages_in_cbz(tmp_path, monkeypatch):
     monkeypatch.setattr(
         verification,
         "get_latest_page_records",
-        lambda _: [{"file_path": str(page), "url": "https://cdn/001.jpg", "folder": str(chapter)}],
+        lambda _: [
+            {
+                "file_path": str(page),
+                "url": "https://cdn/001.jpg",
+                "folder": str(chapter),
+            }
+        ],
     )
 
     cbz.create_cbz_for_all(str(root))
@@ -76,7 +90,13 @@ async def test_repair_library_replaces_corrupt_cbz_page(tmp_path, monkeypatch):
     monkeypatch.setattr(
         verification,
         "get_latest_page_records",
-        lambda _: [{"file_path": str(page), "url": "https://cdn/001.jpg", "folder": str(chapter)}],
+        lambda _: [
+            {
+                "file_path": str(page),
+                "url": "https://cdn/001.jpg",
+                "folder": str(chapter),
+            }
+        ],
     )
     cbz.create_cbz_for_all(str(root))
 
@@ -86,7 +106,9 @@ async def test_repair_library_replaces_corrupt_cbz_page(tmp_path, monkeypatch):
             Path(folder, url.rsplit("/", 1)[-1]).write_bytes(_jpeg_bytes())
         return downloader.DownloadResult(len(urls), len(urls), [str(chapter)])
 
-    monkeypatch.setattr(downloader, "download_all_pages", AsyncMock(side_effect=fake_download))
+    monkeypatch.setattr(
+        downloader, "download_all_pages", AsyncMock(side_effect=fake_download)
+    )
     before, after = await verification.repair_library(str(root))
 
     assert len(before.issues) == 1
@@ -102,8 +124,16 @@ async def test_repair_library_redownloads_from_history(tmp_path, monkeypatch):
     missing = chapter / "002.jpg"
     corrupt.write_bytes(b"broken")
     records = [
-        {"file_path": str(corrupt), "url": "https://cdn/001.jpg", "folder": str(chapter)},
-        {"file_path": str(missing), "url": "https://cdn/002.jpg", "folder": str(chapter)},
+        {
+            "file_path": str(corrupt),
+            "url": "https://cdn/001.jpg",
+            "folder": str(chapter),
+        },
+        {
+            "file_path": str(missing),
+            "url": "https://cdn/002.jpg",
+            "folder": str(chapter),
+        },
     ]
     monkeypatch.setattr(verification, "get_latest_page_records", lambda _: records)
 
@@ -112,7 +142,9 @@ async def test_repair_library_redownloads_from_history(tmp_path, monkeypatch):
             Path(folder, url.rsplit("/", 1)[-1]).write_bytes(_jpeg_bytes())
         return downloader.DownloadResult(len(urls), len(urls), [str(chapter)])
 
-    monkeypatch.setattr(downloader, "download_all_pages", AsyncMock(side_effect=fake_download))
+    monkeypatch.setattr(
+        downloader, "download_all_pages", AsyncMock(side_effect=fake_download)
+    )
     before, after = await verification.repair_library(str(root), workers=2)
 
     assert len(before.issues) == 2

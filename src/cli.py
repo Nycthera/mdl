@@ -62,7 +62,9 @@ def _download_options(parser, *, suppress_defaults=False):
         help="Per-request timeout in seconds (default: 30). "
         "Applies to connect + read; image downloads cap at this total.",
     )
-    parser.add_argument("--cbz", action=argparse.BooleanOptionalAction, default=default())
+    parser.add_argument(
+        "--cbz", action=argparse.BooleanOptionalAction, default=default()
+    )
     parser.add_argument(
         "--output-format",
         choices=("cbz", "epub", "pdf"),
@@ -119,7 +121,9 @@ def parse_args():
     parser.add_argument("--start-page", type=_positive_int)
     parser.add_argument("--max-pages", type=_positive_int)
     _download_options(parser)
-    parser.add_argument("--md-lang", default=None, help="Language code for MangaDex download")
+    parser.add_argument(
+        "--md-lang", default=None, help="Language code for MangaDex download"
+    )
     parser.add_argument(
         "--credits",
         action="store_true",
@@ -159,10 +163,16 @@ def parse_args():
         version=f"%(prog)s {__version__}",
     )
     commands = parser.add_subparsers(dest="command")
-    library = commands.add_parser("library", help="List, inspect, or update tracked titles")
+    library = commands.add_parser(
+        "library", help="List, inspect, or update tracked titles"
+    )
     actions = library.add_subparsers(dest="library_action", required=True)
-    listing = actions.add_parser("list", help="List tracked titles and their last recorded run")
-    status = actions.add_parser("status", help="Inspect a title's saved status and location")
+    listing = actions.add_parser(
+        "list", help="List tracked titles and their last recorded run"
+    )
+    status = actions.add_parser(
+        "status", help="Inspect a title's saved status and location"
+    )
     update = actions.add_parser("update", help="Check and update one tracked title")
     _download_options(update, suppress_defaults=True)
     for command in (listing, status):
@@ -179,7 +189,9 @@ def parse_args():
             help="Enable developer debug logs",
         )
     for command in (status, update):
-        command.add_argument("selector", metavar="TITLE_OR_ID", help="Exact title or id:NUMBER")
+        command.add_argument(
+            "selector", metavar="TITLE_OR_ID", help="Exact title or id:NUMBER"
+        )
     args = parser.parse_args()
     if args.command == "library" and (
         args.manga

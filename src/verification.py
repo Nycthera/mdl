@@ -38,7 +38,9 @@ class VerificationReport:
         return not self.issues
 
 
-def _image_data_problem(suffix: str, size: int, header: bytes, tail: bytes) -> str | None:
+def _image_data_problem(
+    suffix: str, size: int, header: bytes, tail: bytes
+) -> str | None:
     """Check common image formats from their leading and trailing bytes."""
     if size == 0:
         return "empty file"
@@ -46,7 +48,9 @@ def _image_data_problem(suffix: str, size: int, header: bytes, tail: bytes) -> s
         header.startswith(b"\xff\xd8") and tail.endswith(b"\xff\xd9")
     ):
         return "invalid JPEG markers"
-    if suffix == ".png" and not (header.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in tail):
+    if suffix == ".png" and not (
+        header.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in tail
+    ):
         return "invalid PNG markers"
     if suffix == ".gif" and not header.startswith((b"GIF87a", b"GIF89a")):
         return "invalid GIF header"
@@ -79,7 +83,9 @@ def verify_library(root: str) -> VerificationReport:
     root_path = Path(root).expanduser().resolve()
     records = get_latest_page_records(str(root_path))
     expected = {str(Path(record["file_path"]).resolve()): record for record in records}
-    paths: dict[str, dict[str, str] | None] = {path: record for path, record in expected.items()}
+    paths: dict[str, dict[str, str] | None] = {
+        path: record for path, record in expected.items()
+    }
 
     if not root_path.exists() and not paths:
         issue = VerificationIssue(str(root_path), "path does not exist")
@@ -93,11 +99,16 @@ def verify_library(root: str) -> VerificationReport:
                 paths.setdefault(str(path.resolve()), None)
 
     archive_errors = []
-    archived = index_cbz_pages(str(root_path), errors=archive_errors) if root_path.is_dir() else {}
+    archived = (
+        index_cbz_pages(str(root_path), errors=archive_errors)
+        if root_path.is_dir()
+        else {}
+    )
     for path in archived:
         paths.setdefault(path, None)
     issues = [
-        VerificationIssue(path, f"unreadable archive: {error}") for path, error in archive_errors
+        VerificationIssue(path, f"unreadable archive: {error}")
+        for path, error in archive_errors
     ]
     with ExitStack() as stack:
         opened = {}
@@ -129,14 +140,21 @@ def verify_library(root: str) -> VerificationReport:
                 if archive_path is None and path.is_relative_to(root_path):
                     relative = path.relative_to(root_path)
                     chapter_archive = root_path / f"{relative.parts[0]}.cbz"
-                    series_archive = root_path / f"{sanitize_folder_name(root_path.name)}.cbz"
+                    series_archive = (
+                        root_path / f"{sanitize_folder_name(root_path.name)}.cbz"
+                    )
                     if len(relative.parts) > 1 and chapter_archive.is_file():
                         archive_path = str(chapter_archive)
                         archive_name = Path(*relative.parts[1:]).as_posix()
                     elif series_archive.is_file():
-                        archive_path, archive_name = str(series_archive), relative.as_posix()
+                        archive_path, archive_name = (
+                            str(series_archive),
+                            relative.as_posix(),
+                        )
                 issues.append(
-                    VerificationIssue(path_text, problem, url, folder, archive_path, archive_name)
+                    VerificationIssue(
+                        path_text, problem, url, folder, archive_path, archive_name
+                    )
                 )
 
     return VerificationReport(str(root_path), len(paths), tuple(issues))
@@ -193,7 +211,9 @@ async def repair_library(
             and Path(issue.path).exists()
             and _image_problem(Path(issue.path)) is None
         ):
-            archive_repairs.setdefault(issue.archive_path, {})[issue.archive_name] = issue.path
+            archive_repairs.setdefault(issue.archive_path, {})[
+                issue.archive_name
+            ] = issue.path
     archived_files = set()
     for archive_path, files in archive_repairs.items():
         await asyncio.to_thread(update_cbz, archive_path, files, {})

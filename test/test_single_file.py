@@ -67,7 +67,10 @@ assert db.has_new_mangadex_release(1, 2)
     env = os.environ.copy()
     env["HOME"] = str(bundle.parent / "home")
     subprocess.run(
-        [sys.executable, "-I", "-c", code, str(bundle)], cwd=bundle.parent, env=env, check=True
+        [sys.executable, "-I", "-c", code, str(bundle)],
+        cwd=bundle.parent,
+        env=env,
+        check=True,
     )
 
 

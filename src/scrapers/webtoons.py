@@ -316,7 +316,9 @@ async def fetch_webtoons_images(
                 episode_links = await _fetch_episode_links(page, url)
                 if not episode_links:
                     if not CLEAN_OUTPUT:
-                        console.print("[red]No episode links found on the list page.[/]")
+                        console.print(
+                            "[red]No episode links found on the list page.[/]"
+                        )
                     return [], title
 
                 if not CLEAN_OUTPUT:
@@ -326,18 +328,24 @@ async def fetch_webtoons_images(
                     if stop_signal:
                         break
                     if not CLEAN_OUTPUT:
-                        console.print(f"[yellow]Fetching episode {idx}/{len(episode_links)}...[/]")
+                        console.print(
+                            f"[yellow]Fetching episode {idx}/{len(episode_links)}...[/]"
+                        )
                     img_urls = await _fetch_episode_image_urls(page, ep_url)
                     if not img_urls:
                         if not CLEAN_OUTPUT:
-                            console.print(f"[yellow]No images for episode {idx}; skipping.[/]")
+                            console.print(
+                                f"[yellow]No images for episode {idx}; skipping.[/]"
+                            )
                         continue
                     folder = _episode_folder_name(ep_url, idx)
                     urls_to_download.extend((u, folder) for u in img_urls)
             else:
                 # Unknown URL shape — try treating it as a viewer URL.
                 if not CLEAN_OUTPUT:
-                    console.print("[yellow]Unrecognized URL shape; trying as viewer URL.[/]")
+                    console.print(
+                        "[yellow]Unrecognized URL shape; trying as viewer URL.[/]"
+                    )
                 img_urls = await _fetch_episode_image_urls(page, url)
                 folder = _episode_folder_name(url, 1)
                 urls_to_download = [(u, folder) for u in img_urls]
@@ -353,7 +361,11 @@ async def fetch_webtoons_images(
         table.add_row("Images Found", f"[green]{len(urls_to_download)}[/]")
         table.add_row(
             "Status",
-            "[bold green]Success[/]" if urls_to_download else "[bold red]No images found[/]",
+            (
+                "[bold green]Success[/]"
+                if urls_to_download
+                else "[bold red]No images found[/]"
+            ),
         )
         console.print()
         console.print(

@@ -27,7 +27,9 @@ def test_default_book_merges_chapter_archives_and_new_pages_in_order(tmp_path):
     cbz.create_cbz_per_chapter(str(root), series="Display Title", language="ja")
     page(root, "chapter_0004", "002.jpg", b"new page")
 
-    result = create_output_for_all(str(root), "cbz", series="Display Title", language="ja")
+    result = create_output_for_all(
+        str(root), "cbz", series="Display Title", language="ja"
+    )
 
     assert result == str(root / "Saved Title.cbz")
     assert list(root.iterdir()) == [Path(result)]
@@ -58,7 +60,9 @@ def test_default_book_merges_chapter_archives_and_new_pages_in_order(tmp_path):
         assert ET.fromstring(archive.read("ComicInfo.xml")).findtext("PageCount") == "5"
 
 
-def test_failed_book_merge_preserves_chapter_archives_and_previous_book(tmp_path, monkeypatch):
+def test_failed_book_merge_preserves_chapter_archives_and_previous_book(
+    tmp_path, monkeypatch
+):
     root = tmp_path / "Title"
     page(root, "chapter_1")
     result = create_output_for_all(str(root), "cbz")
@@ -82,7 +86,9 @@ def test_failed_book_merge_preserves_chapter_archives_and_previous_book(tmp_path
 
 
 @pytest.mark.parametrize("layout", ["series", "chapter"])
-def test_repeated_packaging_removes_empty_chapters_but_keeps_pending_files(tmp_path, layout):
+def test_repeated_packaging_removes_empty_chapters_but_keeps_pending_files(
+    tmp_path, layout
+):
     root = tmp_path / "Title"
     page(root, "chapter_1")
     create_output_for_all(str(root), "cbz", cbz_layout=layout)
@@ -123,7 +129,9 @@ async def test_cli_uses_config_layout_with_explicit_override(
         settings["cbz_layout"] = saved_layout
     path.write_text(json.dumps(settings))
     monkeypatch.setattr(config, "CONFIG_FILE", str(path))
-    monkeypatch.setattr("sys.argv", ["mdl", "-M", "Title", "--clean-output", *arguments])
+    monkeypatch.setattr(
+        "sys.argv", ["mdl", "-M", "Title", "--clean-output", *arguments]
+    )
     page(tmp_path / "Title", "chapter_1")
     monkeypatch.setattr(
         main,

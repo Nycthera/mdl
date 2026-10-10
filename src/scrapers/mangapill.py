@@ -52,7 +52,9 @@ def set_stop_signal(value: bool) -> None:
 def is_mangapill_url(url: str) -> bool:
     """True if the URL's host is mangapill.com."""
     host = (urlparse(url).hostname or "").lower()
-    return any(host == domain or host.endswith(f".{domain}") for domain in MANGAPILL_DOMAINS)
+    return any(
+        host == domain or host.endswith(f".{domain}") for domain in MANGAPILL_DOMAINS
+    )
 
 
 def _is_chapter_path(url: str) -> bool:
@@ -94,7 +96,11 @@ def _extract_chapter_links(soup: BeautifulSoup) -> list[tuple[str, str]]:
             continue
         title = link.get_text(strip=True)
         url = urljoin(BASE_URL, href)
-        if is_mangapill_url(url) and _is_chapter_path(url) and url not in {row[0] for row in rows}:
+        if (
+            is_mangapill_url(url)
+            and _is_chapter_path(url)
+            and url not in {row[0] for row in rows}
+        ):
             rows.append((url, title))
     rows.reverse()  # listed newest-first; reverse for chronological order
     return rows
@@ -141,7 +147,9 @@ async def fetch_mangapill_images(
             )
         )
 
-    fallback_title = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").title()
+    fallback_title = (
+        urlparse(url).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").title()
+    )
     urls_to_download: list[tuple[str, str]] = []
 
     async with build_session(headers={"Referer": BASE_URL + "/"}) as session:
@@ -167,11 +175,15 @@ async def fetch_mangapill_images(
                 raise RuntimeError(f"No chapter links found on the series page: {url}")
 
             if not CLEAN_OUTPUT:
-                console.print(f"[green]Found {len(chapters)} chapters — fetching concurrently.[/]")
+                console.print(
+                    f"[green]Found {len(chapters)} chapters — fetching concurrently.[/]"
+                )
 
             async def read_images(chapter_url):
                 html = await _fetch_html(session, chapter_url, max_retries=max_retries)
-                return _extract_chapter_images(BeautifulSoup(html, "html.parser"), chapter_url)
+                return _extract_chapter_images(
+                    BeautifulSoup(html, "html.parser"), chapter_url
+                )
 
             urls_to_download = await collect_chapters(
                 chapters,
@@ -191,11 +203,17 @@ async def fetch_mangapill_images(
         table.add_row("Images Found", f"[green]{len(urls_to_download)}[/]")
         table.add_row(
             "Status",
-            ("[bold green]Success[/]" if urls_to_download else "[bold red]No images found[/]"),
+            (
+                "[bold green]Success[/]"
+                if urls_to_download
+                else "[bold red]No images found[/]"
+            ),
         )
         console.print()
         console.print(
-            Panel(Align.center(table), border_style="magenta", title="✨ Scan Complete ✨")
+            Panel(
+                Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"
+            )
         )
 
     return urls_to_download, title

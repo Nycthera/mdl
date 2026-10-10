@@ -11,7 +11,9 @@ from src.database.manga_db import get_library_entries, get_library_entry
 
 def _timestamp(value) -> str:
     return (
-        datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M %Z") if value else "—"
+        datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M %Z")
+        if value
+        else "—"
     )
 
 
@@ -21,7 +23,14 @@ def print_library(console) -> None:
         console.print("No tracked titles. Download a manga to add it to your library.")
         return
     table = Table(title="Library (saved status)")
-    for heading in ("ID", "Title", "Source", "Local chapter", "Last run", "Last checked"):
+    for heading in (
+        "ID",
+        "Title",
+        "Source",
+        "Local chapter",
+        "Last run",
+        "Last checked",
+    ):
         table.add_column(heading)
     for entry in entries:
         table.add_row(
@@ -52,14 +61,20 @@ def print_library_status(console, selector: str) -> None:
     ]
     if entry["source_type"] == "mangadex":
         fields.append(
-            ("Last recorded source chapter", f"{entry['latest_chapter_from_mangadex']:g}")
+            (
+                "Last recorded source chapter",
+                f"{entry['latest_chapter_from_mangadex']:g}",
+            )
         )
     if entry["run_status"]:
         fields.extend(
             [
                 ("Run started", _timestamp(entry["started_at"])),
                 ("Run finished", _timestamp(entry["finished_at"])),
-                ("Pages completed", f"{entry['successful_pages']}/{entry['total_pages']}"),
+                (
+                    "Pages completed",
+                    f"{entry['successful_pages']}/{entry['total_pages']}",
+                ),
                 ("Pages failed", str(entry["failed_pages"])),
             ]
         )

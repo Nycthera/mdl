@@ -48,7 +48,9 @@ def write_entry(
     target.writestr(info, data)
 
 
-def optimize(source_path: Path, output_path: Path, quality: int, method: int, workers: int) -> None:
+def optimize(
+    source_path: Path, output_path: Path, quality: int, method: int, workers: int
+) -> None:
     if source_path.resolve() == output_path.resolve():
         raise ValueError("The output must differ from the input archive")
     if output_path.exists():
@@ -63,7 +65,11 @@ def optimize(source_path: Path, output_path: Path, quality: int, method: int, wo
     try:
         with zipfile.ZipFile(source_path) as source:
             entries = [info for info in source.infolist() if not info.is_dir()]
-            entries = [info for info in entries if PurePosixPath(info.filename).name != ".DS_Store"]
+            entries = [
+                info
+                for info in entries
+                if PurePosixPath(info.filename).name != ".DS_Store"
+            ]
             output_names = [
                 (
                     str(PurePosixPath(info.filename).with_suffix(".webp"))
@@ -73,11 +79,15 @@ def optimize(source_path: Path, output_path: Path, quality: int, method: int, wo
                 for info in entries
             ]
             if len(output_names) != len(set(output_names)):
-                raise ValueError("Converting image extensions would create duplicate entry names")
+                raise ValueError(
+                    "Converting image extensions would create duplicate entry names"
+                )
 
             with zipfile.ZipFile(pending_path, "w", allowZip64=True) as target:
                 with ThreadPoolExecutor(max_workers=workers) as pool:
-                    queue: deque[tuple[zipfile.ZipInfo, str, Future[bytes] | bytes]] = deque()
+                    queue: deque[tuple[zipfile.ZipInfo, str, Future[bytes] | bytes]] = (
+                        deque()
+                    )
                     written = 0
                     total_output = 0
 
@@ -129,8 +139,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="Input CBZ file")
     parser.add_argument("output", type=Path, help="New CBZ file")
-    parser.add_argument("--quality", type=int, default=60, choices=range(1, 101), metavar="1..100")
-    parser.add_argument("--method", type=int, default=4, choices=range(7), metavar="0..6")
+    parser.add_argument(
+        "--quality", type=int, default=60, choices=range(1, 101), metavar="1..100"
+    )
+    parser.add_argument(
+        "--method", type=int, default=4, choices=range(7), metavar="0..6"
+    )
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 1))
     args = parser.parse_args()
     if args.workers < 1:

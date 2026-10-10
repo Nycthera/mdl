@@ -10,7 +10,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from src.cbz import _remove_archived_image_folders, create_cbz_for_all, create_cbz_per_chapter
+from src.cbz import (
+    _remove_archived_image_folders,
+    create_cbz_for_all,
+    create_cbz_per_chapter,
+)
 from src.utils import sanitize_folder_name
 
 OUTPUT_FORMATS = ("cbz", "epub", "pdf")
@@ -58,7 +62,9 @@ def create_epub(folder_path: str) -> str | None:
     pending.unlink(missing_ok=True)
     try:
         with zipfile.ZipFile(pending, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+            archive.writestr(
+                "mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED
+            )
             archive.writestr(
                 "META-INF/container.xml",
                 '<?xml version="1.0" encoding="UTF-8"?>'
@@ -68,19 +74,25 @@ def create_epub(folder_path: str) -> str | None:
             )
             manifest: list[str] = []
             spine: list[str] = []
-            for index, (chapter, chapter_images) in enumerate(_chapter_groups(folder, images), 1):
+            for index, (chapter, chapter_images) in enumerate(
+                _chapter_groups(folder, images), 1
+            ):
                 page_id = f"page-{index}"
                 page_name = f"page-{index}.xhtml"
                 spine.append(f'<itemref idref="{page_id}"/>')
                 body = []
                 for image_index, image in enumerate(chapter_images, 1):
-                    image_name = f"images/{index:04d}-{image_index:04d}{image.suffix.lower()}"
+                    image_name = (
+                        f"images/{index:04d}-{image_index:04d}{image.suffix.lower()}"
+                    )
                     image_id = f"image-{index}-{image_index}"
                     manifest.append(
                         f'<item id="{image_id}" href="{image_name}" media-type="{_media_type(image)}"/>'
                     )
                     archive.write(image, f"OEBPS/{image_name}")
-                    body.append(f'<img src="{html.escape(image_name)}" alt="Page {image_index}"/>')
+                    body.append(
+                        f'<img src="{html.escape(image_name)}" alt="Page {image_index}"/>'
+                    )
                 archive.writestr(
                     f"OEBPS/{page_name}",
                     '<?xml version="1.0" encoding="utf-8"?>'
@@ -136,12 +148,16 @@ def create_pdf(folder_path: str) -> str | None:
                 page = source.convert("RGB")
                 pages.append(page.copy())
         destination = _output_path(folder, "pdf")
-        fd, pending_name = tempfile.mkstemp(prefix=".pending_", suffix=".pdf", dir=folder)
+        fd, pending_name = tempfile.mkstemp(
+            prefix=".pending_", suffix=".pdf", dir=folder
+        )
         os.close(fd)
         pending = Path(pending_name)
         pending.unlink(missing_ok=True)
         try:
-            pages[0].save(pending, "PDF", save_all=True, append_images=pages[1:], resolution=150)
+            pages[0].save(
+                pending, "PDF", save_all=True, append_images=pages[1:], resolution=150
+            )
             _atomic_replace(pending, destination)
         finally:
             pending.unlink(missing_ok=True)
@@ -170,7 +186,9 @@ def create_output_for_all(
     raise ValueError(f"Unsupported output format: {output_format!r}")
 
 
-def create_selected_output(folder_path: str, output_format: str, **options) -> str | None:
+def create_selected_output(
+    folder_path: str, output_format: str, **options
+) -> str | None:
     """Create output while retaining the established CBZ extension point."""
     return create_output_for_all(folder_path, output_format, **options)
 

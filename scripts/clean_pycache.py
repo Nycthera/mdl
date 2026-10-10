@@ -26,7 +26,9 @@ def find_cache_directories(root: Path) -> list[Path]:
     matches: list[Path] = []
     for current, directories, _ in os.walk(root):
         current_path = Path(current)
-        matches.extend(current_path / name for name in directories if name in CACHE_DIRECTORY_NAMES)
+        matches.extend(
+            current_path / name for name in directories if name in CACHE_DIRECTORY_NAMES
+        )
         directories[:] = [
             name
             for name in directories

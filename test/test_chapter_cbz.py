@@ -119,7 +119,9 @@ def test_chapter_cleanup_does_not_follow_symlinks(tmp_path):
         assert "linked.jpg" not in archive.namelist()
 
 
-def test_verification_accepts_legacy_and_chapter_archives_without_history(tmp_path, monkeypatch):
+def test_verification_accepts_legacy_and_chapter_archives_without_history(
+    tmp_path, monkeypatch
+):
     root = tmp_path / "Title"
     page(root, "chapter_1")
     cbz.create_cbz_for_all(str(root))
@@ -133,7 +135,9 @@ def test_verification_accepts_legacy_and_chapter_archives_without_history(tmp_pa
     assert (root / "Title.cbz").read_bytes() == legacy
 
 
-async def test_repair_chapter_cbz_preserves_metadata_and_other_archives(tmp_path, monkeypatch):
+async def test_repair_chapter_cbz_preserves_metadata_and_other_archives(
+    tmp_path, monkeypatch
+):
     root = tmp_path / "Title"
     broken = page(root, "chapter_0.5", data=b"broken")
     missing = broken.parent / "002.jpg"

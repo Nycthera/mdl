@@ -58,7 +58,11 @@ def load_config() -> dict[str, Any]:
         if key not in config:
             continue
         value = config[key]
-        if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
+        if (
+            type(value) is not int
+            or value < minimum
+            or (maximum is not None and value > maximum)
+        ):
             raise ValueError(f"Invalid {key} in {CONFIG_FILE}: {value!r}")
     for key in ("cbz", "clean_output", "credits_shown", "update"):
         if key in config and type(config[key]) is not bool:
@@ -71,7 +75,9 @@ def load_config() -> dict[str, Any]:
     if config.get("cbz_layout", "series") not in ("chapter", "series"):
         raise ValueError("Configuration option cbz_layout must be chapter or series")
     if config.get("reading_direction", "auto") not in ("auto", "rtl", "ltr"):
-        raise ValueError("Configuration option reading_direction must be auto, rtl, or ltr")
+        raise ValueError(
+            "Configuration option reading_direction must be auto, rtl, or ltr"
+        )
 
     # Add missing keys with defaults
     changed = False

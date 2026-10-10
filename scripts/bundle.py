@@ -15,7 +15,9 @@ def bundle(source_dir: Path, output: Path) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source-dir", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument(
+        "--source-dir", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     source_dir = args.source_dir.resolve()

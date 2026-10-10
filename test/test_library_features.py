@@ -45,16 +45,22 @@ def library_db(tmp_path, monkeypatch):
 
 
 def test_library_status_selects_latest_run_for_each_source(library_db):
-    db.record_download("Same Title", 4.5, 5, library_db, source_type="mangadex", source_id="md")
+    db.record_download(
+        "Same Title", 4.5, 5, library_db, source_type="mangadex", source_id="md"
+    )
     first = db.begin_download_run(
         "Same Title", 4, library_db, source_type="mangadex", source_id="md"
     )
-    db.finish_download_run(first, successful_pages=4, failed_pages=0, db_path=library_db)
+    db.finish_download_run(
+        first, successful_pages=4, failed_pages=0, db_path=library_db
+    )
     last = db.begin_download_run(
         "Same Title", 6, library_db, source_type="mangadex", source_id="md"
     )
     db.finish_download_run(last, successful_pages=5, failed_pages=1, db_path=library_db)
-    db.record_download("Same Title", 2, 2, library_db, source_type="mangapill", source_id="pill")
+    db.record_download(
+        "Same Title", 2, 2, library_db, source_type="mangapill", source_id="pill"
+    )
     rows = db.get_library_entries(library_db)
     assert len(rows) == 2
     dex, pill = rows
@@ -64,7 +70,10 @@ def test_library_status_selects_latest_run_for_each_source(library_db):
     assert pill["run_status"] is None
     with pytest.raises(ValueError, match="Multiple sources"):
         db.get_library_entry("same title", library_db)
-    assert db.get_library_entry(f"id:{pill['id']}", library_db)["source_type"] == "mangapill"
+    assert (
+        db.get_library_entry(f"id:{pill['id']}", library_db)["source_type"]
+        == "mangapill"
+    )
     with pytest.raises(ValueError, match="No tracked title"):
         db.get_library_entry("missing", library_db)
 
@@ -74,7 +83,9 @@ def test_library_views_show_saved_status_and_paths(library_db, tmp_path):
     console = Console(file=stream, width=180, color_system=None)
     library.print_library(console)
     assert "No tracked titles" in stream.getvalue()
-    db.record_download("Title [One]", 10.5, 10.5, library_db, output_path=str(tmp_path / "missing"))
+    db.record_download(
+        "Title [One]", 10.5, 10.5, library_db, output_path=str(tmp_path / "missing")
+    )
     library.print_library(console)
     library.print_library_status(console, "title [one]")
     output = stream.getvalue()
@@ -122,12 +133,21 @@ async def test_library_updates_only_selected_source_in_saved_folder(
         output_path=str(destination),
     )
     db.record_download(
-        "My Title", 2, 2, library_db, source_type="generic", output_path=str(tmp_path / "other")
+        "My Title",
+        2,
+        2,
+        library_db,
+        source_type="generic",
+        output_path=str(tmp_path / "other"),
     )
     selected = next(
-        row for row in db.get_library_entries(library_db) if row["source_type"] == source
+        row
+        for row in db.get_library_entries(library_db)
+        if row["source_type"] == source
     )
-    fetch = AsyncMock(return_value=([("https://cdn.test/001.jpg", "chapter_2")], "My Title"))
+    fetch = AsyncMock(
+        return_value=([("https://cdn.test/001.jpg", "chapter_2")], "My Title")
+    )
     monkeypatch.setattr(main, f"fetch_{source}_images", fetch)
     generic = AsyncMock(side_effect=AssertionError("wrong source"))
     monkeypatch.setattr(main, "gather_all_urls", generic)
@@ -141,14 +161,18 @@ async def test_library_updates_only_selected_source_in_saved_folder(
     monkeypatch.setattr(downloader, "download_image", save)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
-        "sys.argv", ["mdl", "library", "update", f"id:{selected['id']}", "--clean-output"]
+        "sys.argv",
+        ["mdl", "library", "update", f"id:{selected['id']}", "--clean-output"],
     )
     await main.main()
     assert (destination / "My Title.cbz").exists()
     assert not (destination / "chapter_2").exists()
     assert not (tmp_path / "My Title").exists()
     assert not (tmp_path / "other").exists()
-    assert db.get_library_entry(f"id:{selected['id']}", library_db)["latest_chapter_local"] == 2
+    assert (
+        db.get_library_entry(f"id:{selected['id']}", library_db)["latest_chapter_local"]
+        == 2
+    )
     assert len(db.get_library_entries(library_db)) == 2
 
     # A second update still discovers the source, but reuses pages inside its CBZ.
@@ -157,10 +181,15 @@ async def test_library_updates_only_selected_source_in_saved_folder(
     generic.assert_not_awaited()
     assert fetch.await_count == 2
     assert not (destination / "chapter_2").exists()
-    assert db.get_library_entry(f"id:{selected['id']}", library_db)["run_status"] == "complete"
+    assert (
+        db.get_library_entry(f"id:{selected['id']}", library_db)["run_status"]
+        == "complete"
+    )
 
 
-async def test_ambiguous_library_update_does_not_start_downloads(library_db, monkeypatch):
+async def test_ambiguous_library_update_does_not_start_downloads(
+    library_db, monkeypatch
+):
     for source in ("mangapill", "manganato"):
         db.record_download("Duplicate", 1, 1, library_db, source_type=source)
     update = AsyncMock()
@@ -193,7 +222,9 @@ async def test_library_update_returns_failure_for_partial_download(
     monkeypatch.setattr(
         downloader, "download_image", AsyncMock(return_value="Failed to download page")
     )
-    monkeypatch.setattr("sys.argv", ["mdl", "library", "update", "Title", "--clean-output"])
+    monkeypatch.setattr(
+        "sys.argv", ["mdl", "library", "update", "Title", "--clean-output"]
+    )
     with pytest.raises(SystemExit) as exc:
         await main.main()
     assert exc.value.code == 1
@@ -230,7 +261,9 @@ async def test_direct_html_download_records_source_and_metadata(
     monkeypatch.setattr(
         main,
         f"fetch_{source}_images",
-        AsyncMock(return_value=([("https://cdn.test/001.jpg", "chapter_12.5")], "New Title")),
+        AsyncMock(
+            return_value=([("https://cdn.test/001.jpg", "chapter_12.5")], "New Title")
+        ),
     )
 
     async def save_image(image_url, folder, **kwargs):
@@ -283,7 +316,9 @@ async def test_mangadex_library_update_uses_saved_folder_and_chapter_metadata(
         output_path=str(destination),
     )
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(mangadex, "get_manga_name_from_md", AsyncMock(return_value="A & B"))
+    monkeypatch.setattr(
+        mangadex, "get_manga_name_from_md", AsyncMock(return_value="A & B")
+    )
     monkeypatch.setattr(
         mangadex,
         "fetch_all_chapters_md",
@@ -307,7 +342,15 @@ async def test_mangadex_library_update_uses_saved_folder_and_chapter_metadata(
     monkeypatch.setattr(downloader, "download_image", save_image)
     monkeypatch.setattr(
         "sys.argv",
-        ["mdl", "library", "update", "A & B", "--clean-output", "--cbz-layout", "chapter"],
+        [
+            "mdl",
+            "library",
+            "update",
+            "A & B",
+            "--clean-output",
+            "--cbz-layout",
+            "chapter",
+        ],
     )
     await main.main()
     archives = list(destination.glob("*.cbz"))
@@ -323,7 +366,9 @@ async def test_mangadex_library_update_uses_saved_folder_and_chapter_metadata(
     assert len(db.get_library_entries(library_db)) == 1
 
 
-async def test_library_list_ignores_saved_dependency_update_action(library_db, monkeypatch):
+async def test_library_list_ignores_saved_dependency_update_action(
+    library_db, monkeypatch
+):
     monkeypatch.setattr(main, "load_config", lambda: {"update": True})
     update = AsyncMock()
     monkeypatch.setattr(main, "update", update)

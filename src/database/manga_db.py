@@ -28,7 +28,9 @@ DEFAULT_DB_PATH = _resolve_db_path(
         os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
     )
 )
-LEGACY_DB_PATH = _resolve_db_path(os.path.join(os.path.dirname(__file__), "manga_collection.db"))
+LEGACY_DB_PATH = _resolve_db_path(
+    os.path.join(os.path.dirname(__file__), "manga_collection.db")
+)
 
 SCHEMA_VERSION = 3
 BUSY_TIMEOUT_MS = 10_000
@@ -213,7 +215,9 @@ def _has_unique_index(
 
 def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
     """Return whether the manga_data table needs to be rebuilt."""
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+    )
     if cursor.fetchone() is None:
         return False
 
@@ -252,7 +256,9 @@ def _canonical_url(url: str | None) -> str | None:
     if not parts.scheme or not parts.netloc:
         return text
     path = parts.path.rstrip("/") or "/"
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
+    )
 
 
 def _make_source_key(
@@ -295,8 +301,7 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
 
     cursor.execute("ALTER TABLE manga_data RENAME TO manga_data_old")
     cursor.execute(SCHEMA_SQL)
-    cursor.execute(
-        f"""
+    cursor.execute(f"""
         INSERT INTO manga_data (
             manga_name,
             date_last_checked,
@@ -329,8 +334,7 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
         FROM manga_data_old
         WHERE manga_name IS NOT NULL AND TRIM(manga_name) != ''
         GROUP BY {source_type} COLLATE NOCASE, {source_key} COLLATE NOCASE
-        """
-    )
+        """)
     cursor.execute("DROP TABLE manga_data_old")
 
 
@@ -344,7 +348,9 @@ def _ensure_history_schema(cursor: sqlite3.Cursor) -> None:
 def _ensure_schema_connection(connection: sqlite3.Connection) -> None:
     """Create or migrate the schema using an existing connection."""
     cursor = connection.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+    )
     if cursor.fetchone() is None:
         cursor.execute(SCHEMA_SQL)
     elif _schema_needs_migration(cursor):
@@ -478,7 +484,9 @@ def record_download(
     source_id = source_id.strip() if source_id else None
     source_key = _make_source_key(manga_name, source_type, source_url, source_id)
     output_path = os.path.abspath(output_path) if output_path else None
-    latest_chapter_local = _normalize_chapter(latest_chapter_local, "latest_chapter_local")
+    latest_chapter_local = _normalize_chapter(
+        latest_chapter_local, "latest_chapter_local"
+    )
     latest_chapter_from_mangadex = _normalize_chapter(
         latest_chapter_from_mangadex, "latest_chapter_from_mangadex"
     )
@@ -528,7 +536,9 @@ def record_download_from_folders(
     latest_local = infer_latest_chapter_from_folders(chapter_folders)
     _db_log(f"Inferred latest local chapter={latest_local}")
     latest_source = (
-        latest_local if latest_chapter_from_mangadex is None else latest_chapter_from_mangadex
+        latest_local
+        if latest_chapter_from_mangadex is None
+        else latest_chapter_from_mangadex
     )
     record_download(
         manga_name=manga_name,
@@ -555,14 +565,12 @@ def get_tracked_manga(
     with _database(db_path) as connection:
         _ensure_schema_connection(connection)
         cursor = connection.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT id, date_last_checked, manga_name, latest_chapter_local, latest_chapter_from_mangadex,
                    source_type, source_url, source_id, language, output_path
             FROM manga_data
             ORDER BY manga_name COLLATE NOCASE ASC
-            """
-        )
+            """)
         rows = cursor.fetchall()
 
     result: list[dict[str, float | str | None]] = []
@@ -655,8 +663,7 @@ def get_library_entries(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
     with _database(db_path) as connection:
         _ensure_schema_connection(connection)
         connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            """
+        rows = connection.execute("""
             SELECT m.*, r.status AS run_status, r.started_at, r.finished_at,
                    r.total_pages, r.successful_pages, r.failed_pages
             FROM manga_data AS m
@@ -666,8 +673,7 @@ def get_library_entries(db_path: str = DEFAULT_DB_PATH) -> list[dict]:
                 ORDER BY recent.started_at DESC, recent.id DESC LIMIT 1
             )
             ORDER BY m.manga_name COLLATE NOCASE, m.source_type, m.id
-            """
-        ).fetchall()
+            """).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -679,19 +685,27 @@ def get_library_entry(selector: str, db_path: str = DEFAULT_DB_PATH) -> dict:
         try:
             manga_id = int(selector[3:])
         except ValueError:
-            raise ValueError("Use id:NUMBER, for example id:3, or an exact title.") from None
+            raise ValueError(
+                "Use id:NUMBER, for example id:3, or an exact title."
+            ) from None
         matches = [entry for entry in entries if entry["id"] == manga_id]
     else:
         matches = [
-            entry for entry in entries if entry["manga_name"].casefold() == selector.casefold()
+            entry
+            for entry in entries
+            if entry["manga_name"].casefold() == selector.casefold()
         ]
     if not matches:
         raise ValueError(
             f"No tracked title matches {selector!r}. Use 'library list' to see titles."
         )
     if len(matches) > 1:
-        choices = ", ".join(f"id:{entry['id']} ({entry['source_type']})" for entry in matches)
-        raise ValueError(f"Multiple sources match {selector!r}; select one with {choices}.")
+        choices = ", ".join(
+            f"id:{entry['id']} ({entry['source_type']})" for entry in matches
+        )
+        raise ValueError(
+            f"Multiple sources match {selector!r}; select one with {choices}."
+        )
     return matches[0]
 
 
@@ -711,7 +725,15 @@ def record_page_results(
 ) -> None:
     """Persist page outcomes as (url, folder, file_path, status, message)."""
     rows = [
-        (run_id, url, folder, os.path.abspath(file_path), status, message, int(time.time()))
+        (
+            run_id,
+            url,
+            folder,
+            os.path.abspath(file_path),
+            status,
+            message,
+            int(time.time()),
+        )
         for url, folder, file_path, status, message in results
     ]
     if not rows:

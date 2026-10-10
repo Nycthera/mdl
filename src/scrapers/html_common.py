@@ -23,12 +23,18 @@ async def fetch_html(session, url: str, *, max_retries: int = 5) -> str:
                     current_url, timeout=get_default_timeout(), allow_redirects=False
                 ) as response:
                     if response.status in {301, 302, 303, 307, 308}:
-                        current_url = redirect_target(current_url, response.headers.get("Location"))
+                        current_url = redirect_target(
+                            current_url, response.headers.get("Location")
+                        )
                         continue
                     if response.status < 400:
                         return await response.text()
                     status = response.status
-                    body = await response.content.read(4096) if status in (403, 503) else b""
+                    body = (
+                        await response.content.read(4096)
+                        if status in (403, 503)
+                        else b""
+                    )
                     break
             else:
                 raise RuntimeError(f"Too many redirects fetching {url}")

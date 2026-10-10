@@ -50,7 +50,9 @@ DEFAULT_CONNECTOR_KWARGS = dict(
     force_close=False,  # keep connections alive (HTTP keep-alive)
 )
 
-DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30, connect=10, sock_connect=10, sock_read=20)
+DEFAULT_TIMEOUT = aiohttp.ClientTimeout(
+    total=30, connect=10, sock_connect=10, sock_read=20
+)
 HEAD_TIMEOUT = aiohttp.ClientTimeout(total=5, connect=5, sock_read=5)
 
 
@@ -454,7 +456,9 @@ async def download_image_streaming(
                     continue
                 if r.status >= 400:
                     # Sniff body for CF classification (cap at 4 KB to bound cost).
-                    body_snippet = await r.content.read(4096) if r.status in (403, 503) else b""
+                    body_snippet = (
+                        await r.content.read(4096) if r.status in (403, 503) else b""
+                    )
                     cls = classify_failure(r.status, body_snippet=body_snippet)
                     last_cls = cls
                     if on_failure_class:
@@ -479,7 +483,9 @@ async def download_image_streaming(
                     last_cls = "retryable"
                     if attempt == max_retries:
                         return False, f"empty-response:{filename}"
-                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_base))
+                    await asyncio.sleep(
+                        compute_backoff("retryable", attempt, backoff_base)
+                    )
                     continue
 
                 # Atomic write: pending tempfile -> os.replace to final path.
@@ -551,7 +557,9 @@ async def make_request(
             ) as r:
                 last_status = r.status
                 if r.status >= 400:
-                    body_snippet = await r.content.read(4096) if r.status in (403, 503) else b""
+                    body_snippet = (
+                        await r.content.read(4096) if r.status in (403, 503) else b""
+                    )
                     cls = classify_failure(r.status, body_snippet=body_snippet)
                     _host_cap.record_failure(url, cls)
                     if cls == "permanent" or attempt == max_retries:

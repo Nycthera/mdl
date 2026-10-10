@@ -15,7 +15,9 @@ release = runpy.run_path(str(ROOT / "scripts" / "release.py"))
 @pytest.mark.parametrize("version", ["0.0.0", "3.5.1", "12.10.0", "3.6.0-rc.1"])
 def test_valid_version(tmp_path, version):
     source = tmp_path / "version.py"
-    source.write_text(f'raise RuntimeError("must not execute")\n__version__ = {version!r}\n')
+    source.write_text(
+        f'raise RuntimeError("must not execute")\n__version__ = {version!r}\n'
+    )
     assert release["read_version"](source) == version
     release["validate_tag"](version, f"v{version}")
 

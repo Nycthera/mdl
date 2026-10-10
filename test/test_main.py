@@ -138,7 +138,9 @@ def test_safe_delete_folder(tmp_path: Path):
 
 def test_extract_manga_uuid_valid():
     url = "https://mangadex.org/title/123e4567-e89b-12d3-a456-426614174000/foobar"
-    assert mangadex_mod.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
+    assert (
+        mangadex_mod.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
+    )
 
 
 def test_extract_manga_uuid_invalid():
@@ -259,7 +261,11 @@ def test_record_download_deduplicates_names_case_insensitively(tmp_path: Path):
     assert tracked[0]["id"] > 0
     assert tracked[0]["date_last_checked"] > 0
     assert [
-        {key: value for key, value in row.items() if key not in ("id", "date_last_checked")}
+        {
+            key: value
+            for key, value in row.items()
+            if key not in ("id", "date_last_checked")
+        }
         for row in tracked
     ] == [
         {
@@ -372,8 +378,7 @@ def test_ensure_schema_migrates_legacy_table_and_dedupes(tmp_path: Path):
     db_path = tmp_path / "manga_collection.db"
     with sqlite3.connect(str(db_path)) as connection:
         cursor = connection.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             CREATE TABLE manga_data (
                 id INTEGER NOT NULL,
                 manga_name TEXT NOT NULL,
@@ -381,8 +386,7 @@ def test_ensure_schema_migrates_legacy_table_and_dedupes(tmp_path: Path):
                 latest_chapter_local NUMERIC NOT NULL,
                 latest_chapter_from_mangadex NUMERIC NOT NULL
             )
-            """
-        )
+            """)
         cursor.executemany(
             "INSERT INTO manga_data VALUES (?, ?, ?, ?, ?)",
             [
@@ -636,7 +640,9 @@ async def test_direct_discovery_uses_responsive_source_and_stops_at_first_gap(
 
     async def fake_url_exists(session, url):
         checked.append(url)
-        return url.startswith("https://fast/") and url.endswith(("-001.png", "-002.png"))
+        return url.startswith("https://fast/") and url.endswith(
+            ("-001.png", "-002.png")
+        )
 
     monkeypatch.setattr(scrapers, "url_exists", fake_url_exists)
     urls, _ = await scrapers._collect_chapter_urls_for_download(

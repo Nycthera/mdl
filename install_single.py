@@ -87,7 +87,9 @@ def build(output: Path, python: str | None = None) -> None:
     shebang = "#!/usr/bin/env python3"
     if python:
         if any(c.isspace() for c in python) or len(os.fsencode(python)) > 120:
-            raise ValueError("Interpreter path must have no whitespace and be <=120 bytes")
+            raise ValueError(
+                "Interpreter path must have no whitespace and be <=120 bytes"
+            )
         shebang = "#!" + python
     license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
     content = (
@@ -131,7 +133,9 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=ROOT / "dist" / "mdl.py")
     parser.add_argument("--bin-dir", type=Path, default=Path.home() / ".local" / "bin")
     parser.add_argument(
-        "--venv-dir", type=Path, default=Path.home() / ".local" / "share" / "mdl" / "venv"
+        "--venv-dir",
+        type=Path,
+        default=Path.home() / ".local" / "share" / "mdl" / "venv",
     )
     parser.add_argument(
         "--skip-deps",
@@ -149,7 +153,9 @@ def main() -> None:
         print(f"Built {args.output}")
         return
     if os.name != "posix":
-        parser.error("Command installation supports macOS/Linux; use --build-only on Windows")
+        parser.error(
+            "Command installation supports macOS/Linux; use --build-only on Windows"
+        )
     python = sys.executable
     if not args.skip_deps:
         uv = shutil.which("uv")

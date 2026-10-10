@@ -145,11 +145,14 @@ from src.verification import repair_library, verify_library
 console = Console()
 
 
-def _create_selected_output(folder_path: str, output_format: str, **options) -> str | None:
+def _create_selected_output(
+    folder_path: str, output_format: str, **options
+) -> str | None:
     """Create an output file while preserving the CBZ test and extension hook."""
     if output_format == "cbz" and options.get("cbz_layout", "series") == "series":
         return create_cbz_for_all(
-            folder_path, **{key: value for key, value in options.items() if key != "cbz_layout"}
+            folder_path,
+            **{key: value for key, value in options.items() if key != "cbz_layout"},
         )
     return create_output_for_all(folder_path, output_format, **options)
 
@@ -195,7 +198,9 @@ def set_global_dev_mode(value: bool) -> None:
     set_db_dev_mode(value)
 
 
-def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | None = None) -> None:
+def print_clean_summary(
+    title: str, chapters: int, pages: int, cbz_path: str | None = None
+) -> None:
     """Print a single boxed summary for clean-output mode."""
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Field", style="cyan", no_wrap=True)
@@ -219,7 +224,9 @@ def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | N
 def _print_verification(report) -> bool:
     """Print an integrity report."""
     if report.valid:
-        console.print(f"[green]Verified {report.checked} files under '{report.root}'.[/]")
+        console.print(
+            f"[green]Verified {report.checked} files under '{report.root}'.[/]"
+        )
         return True
     console.print(
         f"[yellow]Checked {report.checked} files; found {len(report.issues)} issue(s).[/]"
@@ -330,18 +337,24 @@ async def _download_url_source(
     if source == "weebcentral":
         images, title = await fetch_weebcentral_images(url)
         chapter_id = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
-        pages = [(image, sanitize_folder_name(chapter_id)) for image in dict.fromkeys(images)]
+        pages = [
+            (image, sanitize_folder_name(chapter_id)) for image in dict.fromkeys(images)
+        ]
         source_id = source_id or chapter_id
         _, title = get_slug_and_pretty(title)
         referer = url
     elif source == "webtoons":
         pages, title = await fetch_webtoons_images(url)
-        source_id = source_id or parse_qs(urlparse(url).query).get("title_no", [None])[0]
+        source_id = (
+            source_id or parse_qs(urlparse(url).query).get("title_no", [None])[0]
+        )
         referer = WEBTOONS_REFERER
         if not language:
             language = urlparse(url).path.strip("/").split("/")[0] or None
     else:
-        fetcher = fetch_mangapill_images if source == "mangapill" else fetch_manganato_images
+        fetcher = (
+            fetch_mangapill_images if source == "mangapill" else fetch_manganato_images
+        )
         pages, title = await fetcher(
             url, workers=workers, start_chapter=start_chapter, max_retries=max_retries
         )
@@ -379,7 +392,9 @@ async def _download_url_source(
             **_cbz_options(source, title, url, language, cbz_layout, reading_direction),
         )
     if CLEAN_OUTPUT:
-        print_clean_summary(title, len(result.completed_folders), result.successful_pages, output)
+        print_clean_summary(
+            title, len(result.completed_folders), result.successful_pages, output
+        )
     return result
 
 
@@ -438,7 +453,9 @@ async def _update_tracked_title(
             source_id=item.get("source_id"),
         )
     if source != "generic":
-        raise ValueError(f"Cannot update {title!r}: missing URL or unsupported source {source!r}.")
+        raise ValueError(
+            f"Cannot update {title!r}: missing URL or unsupported source {source!r}."
+        )
     slug, inferred_name = get_slug_and_pretty(title)
     destination = str(destination or inferred_name)
     urls = await gather_all_urls(
@@ -473,7 +490,12 @@ async def _update_tracked_title(
             destination,
             output_format,
             **_cbz_options(
-                source, title, source_url, metadata_language, cbz_layout, reading_direction
+                source,
+                title,
+                source_url,
+                metadata_language,
+                cbz_layout,
+                reading_direction,
             ),
         )
     return result
@@ -523,7 +545,13 @@ async def _auto_update_from_db(
                 console.print(f"Incomplete download for '{item['manga_name']}'.")
             if item.get("id") is not None and not stop_signal:
                 await asyncio.to_thread(mark_library_checked, item["id"])
-        except (OSError, RuntimeError, ValueError, sqlite3.Error, zipfile.BadZipFile) as exc:
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            sqlite3.Error,
+            zipfile.BadZipFile,
+        ) as exc:
             failed += 1
             console.print(f"Could not update '{item['manga_name']}': {exc}")
     console.print(f"Library update: checked={checked}, failed={failed}")
@@ -547,20 +575,28 @@ async def main():
 
     manga_name = args.manga or config.get("manga_name")
     start_chapter = (
-        args.start_chapter if args.start_chapter is not None else config.get("start_chapter", 1)
+        args.start_chapter
+        if args.start_chapter is not None
+        else config.get("start_chapter", 1)
     )
     start_page = args.start_page or config.get("start_page", 1)
     max_pages = args.max_pages or config.get("max_pages", 50)
     workers = args.workers or config.get("workers", 10)
     cbz_flag = args.cbz if args.cbz is not None else config.get("cbz", True)
-    output_format = args.output_format or (config.get("output_format", "cbz") if cbz_flag else None)
+    output_format = args.output_format or (
+        config.get("output_format", "cbz") if cbz_flag else None
+    )
     if args.output_format is None and args.cbz is not None:
         output_format = "cbz" if args.cbz else None
     cbz_layout = args.cbz_layout or config.get("cbz_layout", "series")
-    reading_direction = args.reading_direction or config.get("reading_direction", "auto")
+    reading_direction = args.reading_direction or config.get(
+        "reading_direction", "auto"
+    )
     metadata_language = args.metadata_language or config.get("metadata_language")
     md_lang = args.md_lang or config.get("md_language", "en")
-    update_flag = args.update or (config.get("update", False) if args.command is None else False)
+    update_flag = args.update or (
+        config.get("update", False) if args.command is None else False
+    )
     auto_update_db_flag = args.auto_update_db
     dev_flag = args.dev
     clean_flag = args.clean_output or config.get("clean_output", False)
@@ -616,7 +652,9 @@ async def main():
         return
 
     if args.verify:
-        if not _print_verification(await asyncio.to_thread(verify_library, args.verify)):
+        if not _print_verification(
+            await asyncio.to_thread(verify_library, args.verify)
+        ):
             raise SystemExit(1)
         return
 
@@ -672,7 +710,9 @@ async def main():
                 str(manga_name),
                 workers=workers,
                 max_retries=max_retries,
-                start_chapter=args.start_chapter if args.start_chapter is not None else 0,
+                start_chapter=(
+                    args.start_chapter if args.start_chapter is not None else 0
+                ),
                 output_format=output_format,
                 cbz_layout=cbz_layout,
                 reading_direction=reading_direction,
@@ -698,7 +738,9 @@ async def main():
 
     if not urls_to_download:
         if not CLEAN_OUTPUT:
-            console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
+            console.print(
+                f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]"
+            )
         return
 
     download_result = await download_all_pages(
