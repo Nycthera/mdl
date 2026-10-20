@@ -7,7 +7,7 @@ requires-python = ">=3.13"
 license = "GPL-3.0-only"
 authors = [{ name = "Nycthera" }]
 dependencies = [
-    "aiohttp>=3.13.0",
+    "aiohttp>=3.14.4",
     "beautifulsoup4>=4.15.0",
     "playwright>=1.58.0",
     "playwright-stealth>=2.0.2",
