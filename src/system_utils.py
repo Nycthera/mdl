@@ -96,14 +96,18 @@ def update() -> None:
     """Synchronize the locked project environment with uv."""
     project_root = _resolve_project_root()
     if shutil.which("uv") is None:
-        console.print("[red]uv is required. Install it from https://docs.astral.sh/uv/[/]")
+        console.print(
+            "[red]uv is required. Install it from https://docs.astral.sh/uv/[/]"
+        )
         return
 
     console.print(f"[cyan]Syncing dependencies in {project_root}...[/]")
     try:
         subprocess.run(["uv", "sync", "--locked"], cwd=project_root, check=True)
     except subprocess.CalledProcessError as exc:
-        console.print(f"[red]Dependency sync failed with exit code {exc.returncode}.[/]")
+        console.print(
+            f"[red]Dependency sync failed with exit code {exc.returncode}.[/]"
+        )
         return
 
     console.print("[green]Dependencies are synchronized.[/]")

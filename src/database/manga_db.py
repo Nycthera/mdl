@@ -6,6 +6,7 @@ import os
 import re
 import sqlite3
 import time
+from datetime import datetime
 from collections.abc import Iterable, Iterator
 from contextlib import closing, contextmanager
 from math import isfinite
@@ -28,9 +29,11 @@ DEFAULT_DB_PATH = _resolve_db_path(
         os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
     )
 )
-LEGACY_DB_PATH = _resolve_db_path(os.path.join(os.path.dirname(__file__), "manga_collection.db"))
+LEGACY_DB_PATH = _resolve_db_path(
+    os.path.join(os.path.dirname(__file__), "manga_collection.db")
+)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 10_000
 
 SCHEMA_SQL = """
@@ -47,6 +50,7 @@ CREATE TABLE IF NOT EXISTS manga_data (
     source_id TEXT,
     language TEXT,
     output_path TEXT,
+    cbz_hash TEXT,
     UNIQUE (source_type, source_key)
 )
 """
@@ -213,7 +217,9 @@ def _has_unique_index(
 
 def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
     """Return whether the manga_data table needs to be rebuilt."""
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+    )
     if cursor.fetchone() is None:
         return False
 
@@ -236,8 +242,10 @@ def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
         "language",
         "output_path",
     }
-    return not required.issubset(columns) or not _has_unique_index(
-        cursor, "manga_data", ("source_type", "source_key")
+    return (
+        not required.issubset(columns)
+        or "cbz_hash" not in columns
+        or not _has_unique_index(cursor, "manga_data", ("source_type", "source_key"))
     )
 
 
@@ -252,7 +260,9 @@ def _canonical_url(url: str | None) -> str | None:
     if not parts.scheme or not parts.netloc:
         return text
     path = parts.path.rstrip("/") or "/"
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
+    )
 
 
 def _make_source_key(
@@ -273,6 +283,24 @@ def _make_source_key(
 def _migrate_schema(connection: sqlite3.Connection) -> None:
     """Rebuild the manga_data table with the current schema and dedupe rows."""
     cursor = connection.cursor()
+    db_path = connection.execute("PRAGMA database_list").fetchone()[2]
+    backup_path = f"{db_path}.pre-migration-{datetime.now().strftime('%Y%m%d-%H%M%S')}.bak"
+    _backup_database(db_path, backup_path)
+    console.print(
+        f"[yellow]Warning: rebuilding manga_data may change database contents. "
+        f"A backup was saved to {backup_path}.[/]"
+    )
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data_old'"
+    )
+    if cursor.fetchone() is not None:
+        cursor.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+        )
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE manga_data_old RENAME TO manga_data")
+        else:
+            cursor.execute("DROP TABLE manga_data_old")
     cursor.execute("PRAGMA table_info(manga_data)")
     columns = {row[1] for row in cursor.fetchall()}
     date_column = "date_last_checked"
@@ -293,10 +321,25 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
         else "LOWER(TRIM(manga_name))"
     )
 
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data_old'"
+    )
+    if cursor.fetchone() is not None:
+        # Never discard the interrupted migration table: restore it as the source
+        # when the replacement table is just the empty/partial migration result.
+        cursor.execute("SELECT COUNT(*) FROM manga_data")
+        current_count = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM manga_data_old")
+        old_count = cursor.fetchone()[0]
+        if old_count > current_count:
+            cursor.execute("DROP TABLE manga_data")
+            cursor.execute("ALTER TABLE manga_data_old RENAME TO manga_data")
+        else:
+            cursor.execute("DROP TABLE manga_data_old")
+
     cursor.execute("ALTER TABLE manga_data RENAME TO manga_data_old")
     cursor.execute(SCHEMA_SQL)
-    cursor.execute(
-        f"""
+    cursor.execute(f"""
         INSERT INTO manga_data (
             manga_name,
             date_last_checked,
@@ -307,7 +350,8 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             source_url,
             source_id,
             language,
-            output_path
+            output_path,
+            cbz_hash
         )
         SELECT
             MIN(TRIM(manga_name)),
@@ -325,12 +369,12 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             MAX({source_url}),
             MAX({source_id}),
             MAX({language}),
-            MAX({output_path})
+            MAX({output_path}),
+            NULL
         FROM manga_data_old
         WHERE manga_name IS NOT NULL AND TRIM(manga_name) != ''
         GROUP BY {source_type} COLLATE NOCASE, {source_key} COLLATE NOCASE
-        """
-    )
+        """)
     cursor.execute("DROP TABLE manga_data_old")
 
 
@@ -344,12 +388,19 @@ def _ensure_history_schema(cursor: sqlite3.Cursor) -> None:
 def _ensure_schema_connection(connection: sqlite3.Connection) -> None:
     """Create or migrate the schema using an existing connection."""
     cursor = connection.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+    )
     if cursor.fetchone() is None:
         cursor.execute(SCHEMA_SQL)
     elif _schema_needs_migration(cursor):
         _db_log("Migrating manga_data schema")
         _migrate_schema(connection)
+    else:
+        cursor.execute("PRAGMA table_info(manga_data)")
+        columns = {row[1] for row in cursor.fetchall()}
+        if "cbz_hash" not in columns:
+            cursor.execute("ALTER TABLE manga_data ADD COLUMN cbz_hash TEXT")
     _ensure_history_schema(cursor)
     cursor.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -417,6 +468,7 @@ def _upsert_manga(
     source_id: str | None,
     language: str | None,
     output_path: str | None,
+    cbz_hash: str | None = None,
 ) -> int:
     """Insert/update a source-specific title and return its row id."""
     row = cursor.execute(
@@ -424,8 +476,8 @@ def _upsert_manga(
         INSERT INTO manga_data (
             manga_name, date_last_checked, latest_chapter_local,
             latest_chapter_from_mangadex, source_type, source_key,
-            source_url, source_id, language, output_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            source_url, source_id, language, output_path, cbz_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_type, source_key) DO UPDATE SET
             manga_name = excluded.manga_name,
             date_last_checked = MAX(manga_data.date_last_checked, excluded.date_last_checked),
@@ -437,7 +489,8 @@ def _upsert_manga(
             source_url = COALESCE(excluded.source_url, manga_data.source_url),
             source_id = COALESCE(excluded.source_id, manga_data.source_id),
             language = COALESCE(excluded.language, manga_data.language),
-            output_path = COALESCE(excluded.output_path, manga_data.output_path)
+            output_path = COALESCE(excluded.output_path, manga_data.output_path),
+            cbz_hash = COALESCE(excluded.cbz_hash, manga_data.cbz_hash)
         RETURNING id
         """,
         (
@@ -451,6 +504,7 @@ def _upsert_manga(
             source_id,
             language,
             output_path,
+            cbz_hash,
         ),
     ).fetchone()
     return int(row[0])
@@ -467,6 +521,7 @@ def record_download(
     source_id: str | None = None,
     language: str | None = None,
     output_path: str | None = None,
+    cbz_hash: str | None = None,
 ) -> None:
     """Insert or update a manga entry after a successful download."""
     db_path = _resolve_db_path(db_path)
@@ -478,7 +533,9 @@ def record_download(
     source_id = source_id.strip() if source_id else None
     source_key = _make_source_key(manga_name, source_type, source_url, source_id)
     output_path = os.path.abspath(output_path) if output_path else None
-    latest_chapter_local = _normalize_chapter(latest_chapter_local, "latest_chapter_local")
+    latest_chapter_local = _normalize_chapter(
+        latest_chapter_local, "latest_chapter_local"
+    )
     latest_chapter_from_mangadex = _normalize_chapter(
         latest_chapter_from_mangadex, "latest_chapter_from_mangadex"
     )
@@ -507,6 +564,7 @@ def record_download(
             source_id=source_id,
             language=language,
             output_path=output_path,
+            cbz_hash=cbz_hash,
         )
     _db_log("Commit complete")
 
@@ -528,7 +586,9 @@ def record_download_from_folders(
     latest_local = infer_latest_chapter_from_folders(chapter_folders)
     _db_log(f"Inferred latest local chapter={latest_local}")
     latest_source = (
-        latest_local if latest_chapter_from_mangadex is None else latest_chapter_from_mangadex
+        latest_local
+        if latest_chapter_from_mangadex is None
+        else latest_chapter_from_mangadex
     )
     record_download(
         manga_name=manga_name,
@@ -555,14 +615,12 @@ def get_tracked_manga(
     with _database(db_path) as connection:
         _ensure_schema_connection(connection)
         cursor = connection.cursor()
-        cursor.execute(
-            """
+        cursor.execute("""
             SELECT manga_name, latest_chapter_local, latest_chapter_from_mangadex,
                    source_type, source_url, source_id, language, output_path
             FROM manga_data
             ORDER BY manga_name COLLATE NOCASE ASC
-            """
-        )
+            """)
         rows = cursor.fetchall()
 
     result: list[dict[str, float | str | None]] = []
@@ -651,7 +709,15 @@ def record_page_results(
 ) -> None:
     """Persist page outcomes as (url, folder, file_path, status, message)."""
     rows = [
-        (run_id, url, folder, os.path.abspath(file_path), status, message, int(time.time()))
+        (
+            run_id,
+            url,
+            folder,
+            os.path.abspath(file_path),
+            status,
+            message,
+            int(time.time()),
+        )
         for url, folder, file_path, status, message in results
     ]
     if not rows:
@@ -781,3 +847,29 @@ def get_download_history(
         "failed_pages",
     )
     return [dict(zip(keys, row, strict=True)) for row in rows]
+
+
+def hash_generator(file: str) -> str:
+    """Generate a hexadecimal XXH3-128 fingerprint for a .cbz file."""
+    import xxhash
+
+    digest = xxhash.xxh3_128()
+    with open(file, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_hash_to_database(
+    hash_string: str, file_path: str, manga_name: str, db_path: str = DEFAULT_DB_PATH
+) -> None:
+    """Write the hash of a .cbz file to its manga record."""
+    db_path = _resolve_db_path(db_path)
+    with _database(db_path) as connection:
+        _ensure_schema_connection(connection)
+        cursor = connection.cursor()
+        cursor.execute(
+            "UPDATE manga_data SET cbz_hash = ?, output_path = ? "
+            "WHERE manga_name = ? COLLATE NOCASE",
+            (hash_string, os.path.abspath(file_path), manga_name),
+        )

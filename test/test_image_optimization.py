@@ -72,7 +72,9 @@ async def test_downloads_continue_during_optimization(tmp_path, monkeypatch):
     def slow_optimize(path, mode):
         if path.endswith("001.png"):
             optimizer_started.set()
-            assert second_download_started.wait(2), "download slots were held by optimization"
+            assert second_download_started.wait(
+                2
+            ), "download slots were held by optimization"
         return False
 
     monkeypatch.setattr(downloader, "download_image", fake_download)

@@ -133,7 +133,9 @@ async def download_image(
         if stop_signal:
             return f"{Colors.RED}Download interrupted{Colors.RESET}"
         try:
-            async with session.get(url, timeout=get_default_timeout(), headers=headers) as r:
+            async with session.get(
+                url, timeout=get_default_timeout(), headers=headers
+            ) as r:
                 if r.status >= 400:
                     # Best-effort body sniff for Cloudflare classification.
                     body_snippet = b""
@@ -164,7 +166,9 @@ async def download_image(
                             f"{Colors.RED}Failed to download {filename} after "
                             f"{max_retries} attempts: empty response{Colors.RESET}"
                         )
-                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_factor))
+                    await asyncio.sleep(
+                        compute_backoff("retryable", attempt, backoff_factor)
+                    )
                     continue
 
                 # Atomic write: pending tempfile -> os.replace to final path.
@@ -325,7 +329,9 @@ async def _persist_run_history(
     interrupted: bool,
 ) -> None:
     """Persist collected page outcomes and close a durable run."""
-    successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    successful_pages = sum(
+        not _download_failed(value) for value in page_results.values()
+    )
     history_rows = [
         (
             url,
@@ -446,7 +452,9 @@ async def download_all_pages(
                     )
             return args, result
 
-        tasks = [asyncio.create_task(download_worker(item)) for item in urls_to_download]
+        tasks = [
+            asyncio.create_task(download_worker(item)) for item in urls_to_download
+        ]
 
         try:
             if not CLEAN_OUTPUT:
@@ -462,7 +470,9 @@ async def download_all_pages(
                     console=console,
                     transient=True,
                 ) as progress:
-                    task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
+                    task = progress.add_task(
+                        "Downloading", total=total_pages, pages_per_sec="0.0"
+                    )
 
                     start_time = _loop_time()
                     completed = 0
@@ -508,7 +518,9 @@ async def download_all_pages(
 
     if track_to_db and not stop_signal and urls_to_download:
         try:
-            chapter_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
+            chapter_folders = _get_trackable_chapter_folders(
+                urls_to_download, page_results
+            )
             if DEV_MODE and not CLEAN_OUTPUT:
                 console.print(
                     f"[bold blue][db][/bold blue] Triggering save from downloader for '{manga_name}'"
@@ -534,18 +546,20 @@ async def download_all_pages(
                 console.print(
                     f"[bold blue][db][/bold blue] Downloader save finished for '{manga_name}'"
                 )
-        except (sqlite3.Error, OSError):
+        except (sqlite3.Error, OSError, ValueError) as exc:
             # DB tracking should not block downloads.
             if not CLEAN_OUTPUT:
                 console.print(
-                    f"{Colors.YELLOW}Warning: Could not write download metadata for {manga_name}{Colors.RESET}"
+                    f"{Colors.YELLOW}Warning: Could not write download metadata for {manga_name}: {exc}{Colors.RESET}"
                 )
     elif track_to_db and DEV_MODE and not stop_signal and not CLEAN_OUTPUT:
         console.print(
             f"[bold blue][db][/bold blue] Skipping save for '{manga_name}' because no pages were queued"
         )
 
-    successful_pages = sum(not _download_failed(value) for value in page_results.values())
+    successful_pages = sum(
+        not _download_failed(value) for value in page_results.values()
+    )
     if run_id is not None:
         try:
             await _persist_run_history(

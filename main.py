@@ -154,7 +154,9 @@ def set_global_dev_mode(value: bool) -> None:
     set_db_dev_mode(value)
 
 
-def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | None = None) -> None:
+def print_clean_summary(
+    title: str, chapters: int, pages: int, cbz_path: str | None = None
+) -> None:
     """Print a single boxed summary for clean-output mode."""
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Field", style="cyan", no_wrap=True)
@@ -178,7 +180,9 @@ def print_clean_summary(title: str, chapters: int, pages: int, cbz_path: str | N
 def _print_verification(report) -> bool:
     """Print an integrity report."""
     if report.valid:
-        console.print(f"[green]Verified {report.checked} files under '{report.root}'.[/]")
+        console.print(
+            f"[green]Verified {report.checked} files under '{report.root}'.[/]"
+        )
         return True
     console.print(
         f"[yellow]Checked {report.checked} files; found {len(report.issues)} issue(s).[/]"
@@ -266,7 +270,9 @@ async def _auto_update_from_db(
         return
 
     if not CLEAN_OUTPUT:
-        console.print(f"[bold cyan]DB auto-update: checking {len(tracked)} tracked manga[/]")
+        console.print(
+            f"[bold cyan]DB auto-update: checking {len(tracked)} tracked manga[/]"
+        )
 
     processed = 0
     updated = 0
@@ -381,7 +387,9 @@ async def _auto_update_from_db(
             ):
                 # Archive file operations are synchronous — run in a thread
                 # so the event loop is not blocked during CBZ packaging.
-                cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
+                cbz_created_path = await asyncio.to_thread(
+                    create_cbz_for_all, pretty_name
+                )
                 if cbz_created_path and not CLEAN_OUTPUT:
                     console.print(
                         f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
@@ -410,7 +418,9 @@ async def main():
 
     manga_name = args.manga or config.get("manga_name")
     start_chapter = (
-        args.start_chapter if args.start_chapter is not None else config.get("start_chapter", 1)
+        args.start_chapter
+        if args.start_chapter is not None
+        else config.get("start_chapter", 1)
     )
     start_page = args.start_page or config.get("start_page", 1)
     max_pages = args.max_pages or config.get("max_pages", 50)
@@ -446,7 +456,9 @@ async def main():
         return
 
     if args.verify:
-        if not _print_verification(await asyncio.to_thread(verify_library, args.verify)):
+        if not _print_verification(
+            await asyncio.to_thread(verify_library, args.verify)
+        ):
             raise SystemExit(1)
         return
 
@@ -540,7 +552,9 @@ async def main():
             ):
                 # Archive file operations are synchronous — run in a thread
                 # so the event loop is not blocked during CBZ packaging.
-                cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
+                cbz_created_path = await asyncio.to_thread(
+                    create_cbz_for_all, pretty_name
+                )
                 if cbz_created_path and not CLEAN_OUTPUT:
                     console.print(
                         f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
@@ -555,7 +569,9 @@ async def main():
         if CLEAN_OUTPUT:
             total_pages = download_result.successful_pages
             total_chapters = len(download_result.completed_folders)
-            print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
+            print_clean_summary(
+                pretty_name, total_chapters, total_pages, cbz_created_path
+            )
         return
 
     # ---- Webtoons.com case ----
@@ -591,7 +607,9 @@ async def main():
             referer=WEBTOONS_REFERER,  # required — Webtoons CDN enforces anti-hotlink
             source_type="webtoons",
             source_url=str(manga_name),
-            source_id=parse_qs(urlparse(str(manga_name)).query).get("title_no", [None])[0],
+            source_id=parse_qs(urlparse(str(manga_name)).query).get("title_no", [None])[
+                0
+            ],
             output_path=pretty_name,
             optimize_mode=optimize_mode,
         )
@@ -601,7 +619,9 @@ async def main():
             if os.path.isdir(pretty_name) and any(
                 f for f in os.listdir(pretty_name) if not f.lower().endswith(".cbz")
             ):
-                cbz_created_path = await asyncio.to_thread(create_cbz_for_all, pretty_name)
+                cbz_created_path = await asyncio.to_thread(
+                    create_cbz_for_all, pretty_name
+                )
                 if cbz_created_path and not CLEAN_OUTPUT:
                     console.print(
                         f"[bold green]CBZ created successfully:[/] [cyan]{cbz_created_path}[/]"
@@ -615,7 +635,9 @@ async def main():
         if CLEAN_OUTPUT:
             total_pages = download_result.successful_pages
             total_chapters = len(download_result.completed_folders)
-            print_clean_summary(pretty_name, total_chapters, total_pages, cbz_created_path)
+            print_clean_summary(
+                pretty_name, total_chapters, total_pages, cbz_created_path
+            )
         return
 
     # ---- Regular direct image source case ----
@@ -632,7 +654,9 @@ async def main():
 
     if not urls_to_download:
         if not CLEAN_OUTPUT:
-            console.print(f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]")
+            console.print(
+                f"[yellow]No pages found for '{manga_name}' (slug: {slug}).[/]"
+            )
         return
 
     download_result = await download_all_pages(

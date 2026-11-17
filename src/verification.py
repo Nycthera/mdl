@@ -34,7 +34,9 @@ class VerificationReport:
         return not self.issues
 
 
-def _image_data_problem(suffix: str, size: int, header: bytes, tail: bytes) -> str | None:
+def _image_data_problem(
+    suffix: str, size: int, header: bytes, tail: bytes
+) -> str | None:
     """Check common image formats from their leading and trailing bytes."""
     if size == 0:
         return "empty file"
@@ -42,7 +44,9 @@ def _image_data_problem(suffix: str, size: int, header: bytes, tail: bytes) -> s
         header.startswith(b"\xff\xd8") and tail.endswith(b"\xff\xd9")
     ):
         return "invalid JPEG markers"
-    if suffix == ".png" and not (header.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in tail):
+    if suffix == ".png" and not (
+        header.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in tail
+    ):
         return "invalid PNG markers"
     if suffix == ".gif" and not header.startswith((b"GIF87a", b"GIF89a")):
         return "invalid GIF header"
@@ -75,7 +79,9 @@ def verify_library(root: str) -> VerificationReport:
     root_path = Path(root).expanduser().resolve()
     records = get_latest_page_records(str(root_path))
     expected = {record["file_path"]: record for record in records}
-    paths: dict[str, dict[str, str] | None] = {path: record for path, record in expected.items()}
+    paths: dict[str, dict[str, str] | None] = {
+        path: record for path, record in expected.items()
+    }
 
     if not root_path.exists() and not paths:
         issue = VerificationIssue(str(root_path), "path does not exist")
@@ -95,7 +101,9 @@ def verify_library(root: str) -> VerificationReport:
         try:
             archive = zipfile.ZipFile(archive_path)
         except (OSError, zipfile.BadZipFile) as exc:
-            issues.append(VerificationIssue(str(archive_path), f"unreadable archive: {exc}"))
+            issues.append(
+                VerificationIssue(str(archive_path), f"unreadable archive: {exc}")
+            )
     try:
         archived_names = set(archive.namelist()) if archive else set()
         for path_text, record in sorted(paths.items()):

@@ -66,7 +66,11 @@ async def _fetch_html(session, url: str, *, max_retries: int = 4) -> str:
         try:
             async with session.get(url, timeout=DEFAULT_TIMEOUT) as resp:
                 if resp.status >= 400:
-                    body = await resp.content.read(4096) if resp.status in (403, 503) else b""
+                    body = (
+                        await resp.content.read(4096)
+                        if resp.status in (403, 503)
+                        else b""
+                    )
                     cls = classify_failure(resp.status, body_snippet=body)
                     if cls == "permanent" or attempt == max_retries:
                         raise RuntimeError(f"HTTP {resp.status} fetching {url}")
@@ -149,7 +153,9 @@ async def fetch_mangapill_images(
             )
         )
 
-    fallback_title = urlparse(url).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").title()
+    fallback_title = (
+        urlparse(url).path.rstrip("/").rsplit("/", 1)[-1].replace("-", " ").title()
+    )
     urls_to_download: list[tuple[str, str]] = []
 
     async with build_session(headers={"Referer": BASE_URL + "/"}) as session:
@@ -175,11 +181,15 @@ async def fetch_mangapill_images(
                 return [], title
 
             if not CLEAN_OUTPUT:
-                console.print(f"[green]Found {len(chapters)} chapters — fetching concurrently.[/]")
+                console.print(
+                    f"[green]Found {len(chapters)} chapters — fetching concurrently.[/]"
+                )
 
             sem = asyncio.Semaphore(max(1, workers))
 
-            async def _fetch_one(idx: int, chap_url: str, label: str) -> tuple[int, str, list[str]]:
+            async def _fetch_one(
+                idx: int, chap_url: str, label: str
+            ) -> tuple[int, str, list[str]]:
                 async with sem:
                     if stop_signal:
                         return idx, label, []
@@ -224,11 +234,17 @@ async def fetch_mangapill_images(
         table.add_row("Images Found", f"[green]{len(urls_to_download)}[/]")
         table.add_row(
             "Status",
-            "[bold green]Success[/]" if urls_to_download else "[bold red]No images found[/]",
+            (
+                "[bold green]Success[/]"
+                if urls_to_download
+                else "[bold red]No images found[/]"
+            ),
         )
         console.print()
         console.print(
-            Panel(Align.center(table), border_style="magenta", title="✨ Scan Complete ✨")
+            Panel(
+                Align.center(table), border_style="magenta", title="✨ Scan Complete ✨"
+            )
         )
 
     return urls_to_download, title

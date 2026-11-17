@@ -78,7 +78,9 @@ def parse_args():
         action="store_true",
         help="Minimal output: no banner, no progress bars",
     )
-    parser.add_argument("--md-lang", default=None, help="Language code for MangaDex download")
+    parser.add_argument(
+        "--md-lang", default=None, help="Language code for MangaDex download"
+    )
     parser.add_argument(
         "--credits",
         action="store_true",

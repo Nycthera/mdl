@@ -109,7 +109,9 @@ async def fetch_all_chapters_md(
                     if resp.status != 200:
                         cls = classify_failure(resp.status)
                         if cls == "permanent" or attempt == max_retries:
-                            console.print(f"[red]Error fetching chapters: {resp.status}[/]")
+                            console.print(
+                                f"[red]Error fetching chapters: {resp.status}[/]"
+                            )
                             return chapters
                         await asyncio.sleep(compute_backoff(cls, attempt))
                         continue
@@ -168,7 +170,9 @@ async def get_images_md(
                 if resp.status != 200:
                     cls = classify_failure(resp.status)
                     if cls == "permanent" or attempt == max_retries:
-                        console.print(f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]")
+                        console.print(
+                            f"[red]Error fetching chapter {chapter_id}: {resp.status}[/]"
+                        )
                         return []
                     await asyncio.sleep(compute_backoff(cls, attempt))
                     continue
@@ -183,7 +187,9 @@ async def get_images_md(
                 return [f"{base_url}/{mode}/{hash_code}/{page}" for page in pages]
         except (TimeoutError, aiohttp.ClientError) as e:
             if attempt == max_retries:
-                console.print(f"[red]Network error fetching chapter {chapter_id}: {e}[/]")
+                console.print(
+                    f"[red]Network error fetching chapter {chapter_id}: {e}[/]"
+                )
                 return []
             await asyncio.sleep(compute_backoff("retryable", attempt))
     return []
@@ -272,7 +278,9 @@ async def download_md_chapters(
         os.makedirs(manga_root_folder, exist_ok=True)
 
         if not CLEAN_OUTPUT:
-            console.print(f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]")
+            console.print(
+                f"[cyan]Downloading '{manga_name_clean}' in language '{lang}'[/]"
+            )
         chapters = await fetch_all_chapters_md(
             manga_uuid, lang, session=session, max_retries=max_retries
         )
@@ -285,7 +293,9 @@ async def download_md_chapters(
         latest_chapter_from_mangadex = 0.0
 
         all_complete = True
-        selected_chapters: list[tuple[dict[str, Any], re.Match[str] | None, float | None]] = []
+        selected_chapters: list[
+            tuple[dict[str, Any], re.Match[str] | None, float | None]
+        ] = []
         for chapter in chapters:
             attr = chapter.get("attributes", {})
             chapter_num = attr.get("chapter", "Unknown")
@@ -293,7 +303,9 @@ async def download_md_chapters(
             chapter_val = None
             if chapter_match:
                 chapter_val = float(chapter_match.group(1))
-                latest_chapter_from_mangadex = max(latest_chapter_from_mangadex, chapter_val)
+                latest_chapter_from_mangadex = max(
+                    latest_chapter_from_mangadex, chapter_val
+                )
             if chapter_match and chapter_val < start_chapter:
                 continue
             selected_chapters.append((chapter, chapter_match, chapter_val))
@@ -312,7 +324,9 @@ async def download_md_chapters(
             else None
         )
         try:
-            for index, (chapter, chapter_match, chapter_val) in enumerate(selected_chapters):
+            for index, (chapter, chapter_match, chapter_val) in enumerate(
+                selected_chapters
+            ):
                 if stop_signal:
                     all_complete = False
                     break
@@ -322,7 +336,9 @@ async def download_md_chapters(
 
                 images = await prefetch_task
                 prefetch_task = (
-                    asyncio.create_task(fetch_chapter_images(selected_chapters[index + 1][0]))
+                    asyncio.create_task(
+                        fetch_chapter_images(selected_chapters[index + 1][0])
+                    )
                     if index + 1 < len(selected_chapters)
                     else None
                 )
@@ -330,16 +346,22 @@ async def download_md_chapters(
                 if not images:
                     all_complete = False
                     if not CLEAN_OUTPUT:
-                        console.print(f"[yellow]Skipping Chapter {chapter_num} (no images)[/]")
+                        console.print(
+                            f"[yellow]Skipping Chapter {chapter_num} (no images)[/]"
+                        )
                     continue
 
                 # Subfolder per chapter
-                chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip("_")
+                chapter_folder_name = f"Chapter_{chapter_num}_{chapter_title}".strip(
+                    "_"
+                )
                 chapter_folder_name = sanitize_folder_name(chapter_folder_name)
                 chapter_folder = os.path.join(manga_root_folder, chapter_folder_name)
 
                 if not CLEAN_OUTPUT:
-                    console.print(f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]")
+                    console.print(
+                        f"[yellow]Downloading Chapter {chapter_num}: {chapter_title}[/]"
+                    )
 
                 os.makedirs(chapter_folder, exist_ok=True)
                 urls_to_download = [(url, chapter_folder) for url in images]
@@ -362,12 +384,19 @@ async def download_md_chapters(
                 total_pages_downloaded += result.successful_pages
                 total_chapters_downloaded += int(result.complete)
                 all_complete = all_complete and result.complete
-                if chapter_match and chapter_val is not None and all_complete and not stop_signal:
+                if (
+                    chapter_match
+                    and chapter_val is not None
+                    and all_complete
+                    and not stop_signal
+                ):
                     latest_chapter_local = max(latest_chapter_local, chapter_val)
 
                 if not os.listdir(chapter_folder):
                     if not CLEAN_OUTPUT:
-                        console.print(f"[red]Removing empty folder {chapter_folder_name}[/]")
+                        console.print(
+                            f"[red]Removing empty folder {chapter_folder_name}[/]"
+                        )
                     os.rmdir(chapter_folder)
         finally:
             if prefetch_task is not None and not prefetch_task.done():
@@ -381,7 +410,9 @@ async def download_md_chapters(
         if create_cbz and all_complete and not stop_signal:
             cbz_path = await asyncio.to_thread(create_cbz_for_all, manga_root_folder)
             if cbz_path and not CLEAN_OUTPUT:
-                console.print(f"[bold green]CBZ created successfully:[/] [cyan]{cbz_path}[/]")
+                console.print(
+                    f"[bold green]CBZ created successfully:[/] [cyan]{cbz_path}[/]"
+                )
 
         # Summary output for clean mode
         if CLEAN_OUTPUT:
@@ -393,7 +424,7 @@ async def download_md_chapters(
                 msg += f", cbz='{cbz_path}'"
             print(msg)
 
-        if latest_chapter_local > 0 and not stop_signal:
+        if latest_chapter_local > 0:
             # SQLite writes are synchronous — run in a thread to avoid
             # blocking the event loop during the DB write.
             await asyncio.to_thread(
