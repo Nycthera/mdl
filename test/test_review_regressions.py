@@ -37,9 +37,7 @@ def test_failed_archive_update_preserves_archive_and_sources(tmp_path, monkeypat
     archive = cbz.create_cbz_for_all(str(root))
     original = (root / "Title.cbz").read_bytes()
     page.write_bytes(b"replacement")
-    monkeypatch.setattr(
-        zipfile.ZipFile, "write", MagicMock(side_effect=OSError("disk full"))
-    )
+    monkeypatch.setattr(zipfile.ZipFile, "write", MagicMock(side_effect=OSError("disk full")))
     with pytest.raises(OSError):
         cbz.create_cbz_for_all(str(root))
     assert open(archive, "rb").read() == original
@@ -52,9 +50,7 @@ def test_failed_archive_creation_keeps_image_folder(tmp_path, monkeypatch):
     chapter.mkdir(parents=True)
     page = chapter / "001.png"
     page.write_bytes(b"page")
-    monkeypatch.setattr(
-        zipfile.ZipFile, "write", MagicMock(side_effect=OSError("disk full"))
-    )
+    monkeypatch.setattr(zipfile.ZipFile, "write", MagicMock(side_effect=OSError("disk full")))
 
     with pytest.raises(OSError):
         cbz.create_cbz_for_all(str(root))
@@ -105,9 +101,7 @@ async def test_mirrors_choose_one_url_per_page(tmp_path, monkeypatch):
     import src.scrapers as scrapers
 
     urls = ["https://a/manga/0001-001.png", "https://b/manga/0001-001.png"]
-    monkeypatch.setattr(
-        scrapers, "_collect_existing_urls", AsyncMock(return_value=urls[::-1])
-    )
+    monkeypatch.setattr(scrapers, "_collect_existing_urls", AsyncMock(return_value=urls[::-1]))
     result, _ = await _collect_chapter_urls_for_download(
         "manga", "0001", 1, 1, str(tmp_path), 2, None, ["https://a/", "https://b/"]
     )
@@ -125,9 +119,7 @@ def test_db_progress_never_regresses(tmp_path):
 
 async def test_download_failure_is_returned_to_caller(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "CLEAN_OUTPUT", True)
-    monkeypatch.setattr(
-        downloader, "download_image", AsyncMock(return_value="Failed to download")
-    )
+    monkeypatch.setattr(downloader, "download_image", AsyncMock(return_value="Failed to download"))
     result = await downloader.download_all_pages(
         [("https://example.com/001.png", str(tmp_path))], track_to_db=False
     )
@@ -288,9 +280,7 @@ async def test_auto_update_routes_mangadex_from_saved_source(monkeypatch):
 
 
 @pytest.mark.parametrize("source", ["webtoons", "weebcentral", "direct"])
-async def test_main_routes_downloads_and_propagates_failures(
-    source, tmp_path, monkeypatch
-):
+async def test_main_routes_downloads_and_propagates_failures(source, tmp_path, monkeypatch):
     from src.cli import parse_args
 
     monkeypatch.chdir(tmp_path)
@@ -306,18 +296,14 @@ async def test_main_routes_downloads_and_propagates_failures(
     monkeypatch.setattr(
         main,
         "fetch_webtoons_images",
-        AsyncMock(
-            return_value=([("https://cdn.test/001.png", "episode_0001")], "Title")
-        ),
+        AsyncMock(return_value=([("https://cdn.test/001.png", "episode_0001")], "Title")),
     )
     monkeypatch.setattr(
         main,
         "fetch_weebcentral_images",
         AsyncMock(return_value=(["https://cdn.test/001.png"], "Title")),
     )
-    gather = AsyncMock(
-        return_value=[("https://cdn.test/001.png", "Title/chapter_0001")]
-    )
+    gather = AsyncMock(return_value=[("https://cdn.test/001.png", "Title/chapter_0001")])
     monkeypatch.setattr(main, "gather_all_urls", gather)
     download = AsyncMock(return_value=downloader.DownloadResult(0, 1, []))
     monkeypatch.setattr(main, "download_all_pages", download)
@@ -338,9 +324,7 @@ async def test_main_routes_downloads_and_propagates_failures(
 async def test_mangadex_failed_chapter_does_not_advance_db(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(mangadex, "stop_signal", False)
-    monkeypatch.setattr(
-        mangadex, "get_manga_name_from_md", AsyncMock(return_value="Title")
-    )
+    monkeypatch.setattr(mangadex, "get_manga_name_from_md", AsyncMock(return_value="Title"))
     monkeypatch.setattr(
         mangadex,
         "fetch_all_chapters_md",
@@ -372,8 +356,7 @@ async def test_mangadex_failed_chapter_does_not_advance_db(tmp_path, monkeypatch
         "https://mangadex.org/title/12345678-1234-1234-1234-123456789abc"
     )
     assert all(
-        call.kwargs["session"] is not None
-        for call in mangadex.download_all_pages.await_args_list
+        call.kwargs["session"] is not None for call in mangadex.download_all_pages.await_args_list
     )
     record.assert_not_called()
     archive.assert_not_called()
@@ -406,9 +389,7 @@ def test_archive_preserves_legacy_archive_only_entries(tmp_path):
         assert stream.read("chapter_0001/001.png") == b"old"
 
 
-@pytest.mark.parametrize(
-    "value", [[], {"workers": 0}, {"workers": "ten"}, {"cbz": "false"}]
-)
+@pytest.mark.parametrize("value", [[], {"workers": 0}, {"workers": "ten"}, {"cbz": "false"}])
 def test_invalid_config_fails_without_rewriting(tmp_path, monkeypatch, value):
     import json
 
@@ -438,9 +419,7 @@ def test_config_failed_save_preserves_existing_data(tmp_path, monkeypatch):
     path = tmp_path / "config.json"
     path.write_text('{"workers": 2}')
     monkeypatch.setattr(config, "CONFIG_FILE", str(path))
-    monkeypatch.setattr(
-        config.os, "replace", MagicMock(side_effect=OSError("disk full"))
-    )
+    monkeypatch.setattr(config.os, "replace", MagicMock(side_effect=OSError("disk full")))
     with pytest.raises(OSError):
         config.save_config({"workers": 3})
     assert path.read_text() == '{"workers": 2}'
@@ -477,9 +456,7 @@ async def test_cancelling_batch_cancels_download_workers(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "download_image", slow_download)
     monkeypatch.setattr(downloader, "CLEAN_OUTPUT", True)
     task = asyncio.create_task(
-        downloader.download_all_pages(
-            [("https://test/001.png", str(tmp_path))], track_to_db=False
-        )
+        downloader.download_all_pages([("https://test/001.png", str(tmp_path))], track_to_db=False)
     )
     await asyncio.wait_for(started.wait(), timeout=2)
     task.cancel()
@@ -556,9 +533,7 @@ async def test_mangadex_prefetches_next_manifest_during_download(tmp_path, monke
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(mangadex, "stop_signal", False)
     monkeypatch.setattr(mangadex, "CLEAN_OUTPUT", True)
-    monkeypatch.setattr(
-        mangadex, "get_manga_name_from_md", AsyncMock(return_value="Title")
-    )
+    monkeypatch.setattr(mangadex, "get_manga_name_from_md", AsyncMock(return_value="Title"))
     monkeypatch.setattr(
         mangadex,
         "fetch_all_chapters_md",
@@ -582,9 +557,7 @@ async def test_mangadex_prefetches_next_manifest_during_download(tmp_path, monke
         return downloader.DownloadResult(1, 1, [urls[0][1]])
 
     monkeypatch.setattr(mangadex, "get_images_md", get_images)
-    monkeypatch.setattr(
-        mangadex, "download_all_pages", AsyncMock(side_effect=download_pages)
-    )
+    monkeypatch.setattr(mangadex, "download_all_pages", AsyncMock(side_effect=download_pages))
     monkeypatch.setattr(mangadex, "record_download", MagicMock())
 
     await mangadex.download_md_chapters(

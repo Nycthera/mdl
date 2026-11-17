@@ -55,11 +55,7 @@ def load_config() -> dict[str, Any]:
         if key not in config:
             continue
         value = config[key]
-        if (
-            type(value) is not int
-            or value < minimum
-            or (maximum is not None and value > maximum)
-        ):
+        if type(value) is not int or value < minimum or (maximum is not None and value > maximum):
             raise ValueError(f"Invalid {key} in {CONFIG_FILE}: {value!r}")
     for key in ("cbz", "clean_output", "credits_shown", "update"):
         if key in config and type(config[key]) is not bool:

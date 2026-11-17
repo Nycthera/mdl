@@ -105,18 +105,12 @@ async def _collect_chapter_urls_for_download(
     """
     chapter_folder = os.path.join(folder_base, f"chapter_{chapter_label}")
     os.makedirs(chapter_folder, exist_ok=True)
-    urls = _build_chapter_urls(
-        manga_name, chapter_label, start_page, max_pages, base_urls
-    )
+    urls = _build_chapter_urls(manga_name, chapter_label, start_page, max_pages, base_urls)
     if not urls or not base_urls:
         return [], chapter_folder
 
-    page_names = [
-        f"{chapter_label}-{page:03d}.png" for page in range(start_page, max_pages + 1)
-    ]
-    primary_urls = [
-        f"{base_urls[0]}{manga_name}/{page_name}" for page_name in page_names
-    ]
+    page_names = [f"{chapter_label}-{page:03d}.png" for page in range(start_page, max_pages + 1)]
+    primary_urls = [f"{base_urls[0]}{manga_name}/{page_name}" for page_name in page_names]
     found_primary = await _collect_existing_urls(
         primary_urls, f"Checking Chapter {chapter_label}", workers, session
     )

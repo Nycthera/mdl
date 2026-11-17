@@ -81,14 +81,11 @@ def create_cbz_for_all(folder_path: str) -> str | None:
     try:
         hash_started = time.perf_counter()
         archive_hash = hash_generator(cbz_name)
-        write_hash_to_database(
-            archive_hash, cbz_name, os.path.basename(base_folder)
-        )
+        write_hash_to_database(archive_hash, cbz_name, os.path.basename(base_folder))
         if not CLEAN_OUTPUT and os.environ.get("MDL_DEV_MODE") == "1":
             elapsed = time.perf_counter() - hash_started
             console.print(
-                f"[blue]XXH3-128 fingerprint: {archive_hash} "
-                f"(calculated in {elapsed:.2f}s)[/]"
+                f"[blue]XXH3-128 fingerprint: {archive_hash} (calculated in {elapsed:.2f}s)[/]"
             )
     except (OSError, sqlite3.Error) as exc:
         console.print(f"[red]Error generating hash for {cbz_name}: {exc}[/]")
@@ -112,8 +109,7 @@ def create_cbz_for_all(folder_path: str) -> str | None:
         if not all(path in archived_files for path in files_in_folder):
             continue
         if not any(
-            os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS
-            for path in files_in_folder
+            os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS for path in files_in_folder
         ):
             continue
         try:
@@ -121,8 +117,6 @@ def create_cbz_for_all(folder_path: str) -> str | None:
             if not CLEAN_OUTPUT:
                 console.print(f"[green]Removed archived image folder {folder}[/]")
         except OSError as exc:
-            console.print(
-                f"[yellow]Could not remove archived image folder {folder}: {exc}[/]"
-            )
+            console.print(f"[yellow]Could not remove archived image folder {folder}: {exc}[/]")
 
     return cbz_name
