@@ -37,3 +37,7 @@ jobs:
 
       - name: Check formatting with Ruff
         run: uv run ruff format --check .
+
+      - name: Format failed code
+        if: failure()
+        run: uv run ruff check . --fix
