@@ -6,9 +6,9 @@ import os
 import re
 import sqlite3
 import time
-from datetime import datetime
 from collections.abc import Iterable, Iterator
 from contextlib import closing, contextmanager
+from datetime import datetime
 from math import isfinite
 from urllib.parse import urlsplit, urlunsplit
 

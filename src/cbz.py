@@ -1,16 +1,16 @@
 """CBZ (Comic Book Archive) creation functionality."""
 
 import os
-import sqlite3
 import shutil
-import time
+import sqlite3
 import tempfile
+import time
 import zipfile
 
 from rich.console import Console
 
-from src.utils import sanitize_folder_name
 from src.database.manga_db import hash_generator, write_hash_to_database
+from src.utils import sanitize_folder_name
 
 console = Console()
 CLEAN_OUTPUT = False
