@@ -244,7 +244,10 @@ def test_database_uses_wal_busy_timeout_and_schema_version(tmp_path: Path):
     try:
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
         assert connection.execute("PRAGMA busy_timeout").fetchone()[0] == 10_000
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert (
+            connection.execute("PRAGMA user_version").fetchone()[0]
+            == manga_db_mod.SCHEMA_VERSION
+        )
     finally:
         connection.close()
 
