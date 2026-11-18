@@ -114,9 +114,7 @@ async def fetch_weebcentral_images(url: str) -> tuple[list[str], str]:
 
         if not CLEAN_OUTPUT:
             # --- Fancy summary table ---
-            table = Table(
-                title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]"
-            )
+            table = Table(title="[bold magenta]WeebCentral Extraction Summary[/bold magenta]")
             table.add_column("Field", style="cyan", no_wrap=True)
             table.add_column("Value", style="white")
 
@@ -124,11 +122,7 @@ async def fetch_weebcentral_images(url: str) -> tuple[list[str], str]:
             table.add_row("Images Found", f"[green]{len(img_urls)}[/]")
             table.add_row(
                 "Status",
-                (
-                    "[bold green]Success[/]"
-                    if img_urls
-                    else "[bold red]No images found[/]"
-                ),
+                ("[bold green]Success[/]" if img_urls else "[bold red]No images found[/]"),
             )
 
             console.print()

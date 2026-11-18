@@ -11,9 +11,7 @@ from src.database.manga_db import get_library_entries, get_library_entry
 
 def _timestamp(value) -> str:
     return (
-        datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M %Z")
-        if value
-        else "—"
+        datetime.fromtimestamp(value).astimezone().strftime("%Y-%m-%d %H:%M %Z") if value else "—"
     )
 
 
