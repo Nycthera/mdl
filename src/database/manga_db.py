@@ -11,6 +11,7 @@ from contextlib import closing, contextmanager
 from math import isfinite
 from urllib.parse import urlsplit, urlunsplit
 
+import xxhash
 from rich.console import Console
 
 from src.config import get_config_path
@@ -857,7 +858,6 @@ def get_download_history(
 
 def hash_generator(file: str) -> str:
     """Generate a hexadecimal XXH3-128 local fingerprint for a CBZ file."""
-    import xxhash
 
     digest = xxhash.xxh3_128()
     with open(file, "rb") as stream:
