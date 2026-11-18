@@ -44,6 +44,7 @@ def test_create_default_config(tmp_path: Path, monkeypatch):
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     assert "manga_name" in cfg
     assert isinstance(cfg["workers"], int)
+    assert cfg["cbz_layout"] == "series"
 
 
 def test_load_config_creates_default(tmp_path: Path, monkeypatch):
@@ -137,7 +138,9 @@ def test_safe_delete_folder(tmp_path: Path):
 
 def test_extract_manga_uuid_valid():
     url = "https://mangadex.org/title/123e4567-e89b-12d3-a456-426614174000/foobar"
-    assert mangadex_mod.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
+    assert (
+        mangadex_mod.extract_manga_uuid(url) == "123e4567-e89b-12d3-a456-426614174000"
+    )
 
 
 def test_extract_manga_uuid_invalid():
@@ -256,7 +259,17 @@ def test_record_download_deduplicates_names_case_insensitively(tmp_path: Path):
     record_download("  One Piece  ", 10, 11, db_path)
     record_download("one piece", 12, 12, db_path)
 
-    assert get_tracked_manga(db_path) == [
+    tracked = get_tracked_manga(db_path)
+    assert tracked[0]["id"] > 0
+    assert tracked[0]["date_last_checked"] > 0
+    assert [
+        {
+            key: value
+            for key, value in row.items()
+            if key not in ("id", "date_last_checked")
+        }
+        for row in tracked
+    ] == [
         {
             "manga_name": "one piece",
             "latest_chapter_local": 12.0,
@@ -629,7 +642,9 @@ async def test_direct_discovery_uses_responsive_source_and_stops_at_first_gap(
 
     async def fake_url_exists(session, url):
         checked.append(url)
-        return url.startswith("https://fast/") and url.endswith(("-001.png", "-002.png"))
+        return url.startswith("https://fast/") and url.endswith(
+            ("-001.png", "-002.png")
+        )
 
     monkeypatch.setattr(scrapers, "url_exists", fake_url_exists)
     urls, _ = await scrapers._collect_chapter_urls_for_download(
@@ -648,3 +663,4 @@ async def test_direct_discovery_uses_responsive_source_and_stops_at_first_gap(
         "https://fast/series/0001-002.png",
     ]
     assert len(checked) == 52  # 50 primary probes + two mirrors for the boundary only
+    assert not (tmp_path / "chapter_0001").exists()

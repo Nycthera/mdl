@@ -6,6 +6,7 @@ import aiohttp
 from rich.console import Console
 
 from src.downloader import url_exists
+from src.http import PublicAddressResolver
 from src.scrapers import _collect_chapter_urls_for_download
 from src.scrapers import set_clean_output as set_scraper_clean_output
 from src.utils import sanitize_folder_name
@@ -70,7 +71,10 @@ async def _chapter_exists(
     base_urls: list[str],
 ) -> bool:
     """Return whether a chapter has at least one page on any configured source."""
-    return await _find_chapter_source(session, manga_name, chapter_label, base_urls) is not None
+    return (
+        await _find_chapter_source(session, manga_name, chapter_label, base_urls)
+        is not None
+    )
 
 
 async def gather_all_urls(
@@ -95,6 +99,7 @@ async def gather_all_urls(
         limit_per_host=max(1, workers),
         keepalive_timeout=30,
         ttl_dns_cache=300,
+        resolver=PublicAddressResolver(),
     )
     async with aiohttp.ClientSession(connector=connector) as session:
         chapter = start_chapter
@@ -104,7 +109,9 @@ async def gather_all_urls(
 
             chapter_str = f"{chapter:04d}"
             chapter_labels = [chapter_str]
-            chapter_labels.extend(f"{chapter_str}.{dec}" for dec in range(1, max_decimals + 1))
+            chapter_labels.extend(
+                f"{chapter_str}.{dec}" for dec in range(1, max_decimals + 1)
+            )
 
             # A missing decimal used to cost one full network round trip each.
             # Probe the integer and decimal variants together; the connector still
@@ -141,7 +148,9 @@ async def gather_all_urls(
                 )
                 urls_to_download.extend((url, chapter_folder) for url in found_urls)
                 if not CLEAN_OUTPUT:
-                    console.print(f"[green]Chapter {found_label}: {len(found_urls)} pages found[/]")
+                    console.print(
+                        f"[green]Chapter {found_label}: {len(found_urls)} pages found[/]"
+                    )
 
             if not found_chapters:
                 if not CLEAN_OUTPUT:

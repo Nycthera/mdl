@@ -52,7 +52,7 @@ def test_small_mode_keeps_jpeg_name_and_can_be_archived(tmp_path):
     assert page.stat().st_size < original_size
     archive = create_cbz_for_all(str(root))
     with zipfile.ZipFile(archive) as cbz:
-        assert cbz.namelist() == ["Chapter 1/001.jpg"]
+        assert cbz.namelist() == ["Chapter 1/001.jpg", "ComicInfo.xml"]
         assert cbz.getinfo("Chapter 1/001.jpg").compress_type == zipfile.ZIP_DEFLATED
         assert cbz.read("Chapter 1/001.jpg").startswith(b"\xff\xd8")
 
@@ -72,7 +72,9 @@ async def test_downloads_continue_during_optimization(tmp_path, monkeypatch):
     def slow_optimize(path, mode):
         if path.endswith("001.png"):
             optimizer_started.set()
-            assert second_download_started.wait(2), "download slots were held by optimization"
+            assert second_download_started.wait(
+                2
+            ), "download slots were held by optimization"
         return False
 
     monkeypatch.setattr(downloader, "download_image", fake_download)

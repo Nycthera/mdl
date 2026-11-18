@@ -32,7 +32,8 @@ def read_version(path: Path = VERSION_FILE) -> str:
         for node in tree.body
         if isinstance(node, ast.Assign)
         and any(
-            isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets
+            isinstance(target, ast.Name) and target.id == "__version__"
+            for target in node.targets
         )
     ]
     if len(values) != 1 or not isinstance(values[0], str):
@@ -42,7 +43,8 @@ def read_version(path: Path = VERSION_FILE) -> str:
     if not match:
         raise ValueError(f"Invalid version {version!r}; use X.Y.Z or X.Y.Z-rc.1")
     if match[1] and any(
-        part.isdigit() and len(part) > 1 and part.startswith("0") for part in match[1].split(".")
+        part.isdigit() and len(part) > 1 and part.startswith("0")
+        for part in match[1].split(".")
     ):
         raise ValueError("Numeric prerelease identifiers cannot have leading zeros")
     return version
@@ -112,7 +114,9 @@ def build_assets(output: Path, version: str) -> None:
         "Keep that environment active when invoking the installed command.\n",
         encoding="utf-8",
     )
-    shutil.copyfile(ROOT / "release-notes" / f"v{version}.md", output / "RELEASE_NOTES.md")
+    shutil.copyfile(
+        ROOT / "release-notes" / f"v{version}.md", output / "RELEASE_NOTES.md"
+    )
     assets = [
         output / name
         for name in (
@@ -126,7 +130,8 @@ def build_assets(output: Path, version: str) -> None:
     ]
     (output / "SHA256SUMS").write_text(
         "".join(
-            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n" for path in assets
+            f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
+            for path in assets
         ),
         encoding="utf-8",
     )
