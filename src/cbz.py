@@ -3,7 +3,9 @@
 import os
 import re
 import shutil
+import sqlite3
 import tempfile
+import time
 import zipfile
 from contextlib import ExitStack
 from decimal import Decimal
@@ -12,6 +14,7 @@ from xml.etree import ElementTree as ET
 
 from rich.console import Console
 
+from src.database.manga_db import hash_generator, write_hash_to_database
 from src.utils import sanitize_folder_name
 
 console = Console()
@@ -26,9 +29,7 @@ def _natural_key(value: str):
     ]
 
 
-def _comic_info(
-    metadata: dict, page_count: int, previous: bytes | None = None
-) -> bytes:
+def _comic_info(metadata: dict, page_count: int, previous: bytes | None = None) -> bytes:
     try:
         root = ET.fromstring(previous) if previous else ET.Element("ComicInfo")
     except ET.ParseError as exc:
@@ -54,9 +55,7 @@ def update_cbz(
     destination = Path(archive_path)
     if destination.is_symlink():
         raise ValueError(f"Cannot update a symlink archive: {destination}")
-    fd, pending = tempfile.mkstemp(
-        prefix=".pending_", suffix=".cbz", dir=destination.parent
-    )
+    fd, pending = tempfile.mkstemp(prefix=".pending_", suffix=".cbz", dir=destination.parent)
     os.close(fd)
     try:
         previous_metadata = None
@@ -76,9 +75,7 @@ def update_cbz(
                 entries[name] = (sources[path], sources[path].getinfo(member))
             names = set(entries) | set(files)
             target = stack.enter_context(
-                zipfile.ZipFile(
-                    pending, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
-                )
+                zipfile.ZipFile(pending, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6)
             )
             for name in sorted(names, key=_natural_key):
                 if name in files:
@@ -88,9 +85,7 @@ def update_cbz(
                     with archive.open(entry) as source, target.open(name, "w") as dest:
                         shutil.copyfileobj(source, dest)
             if metadata is not None:
-                page_count = sum(
-                    Path(name).suffix.lower() in IMAGE_EXTENSIONS for name in names
-                )
+                page_count = sum(Path(name).suffix.lower() in IMAGE_EXTENSIONS for name in names)
                 target.writestr(
                     "ComicInfo.xml",
                     _comic_info(metadata, page_count, previous_metadata),
@@ -163,6 +158,18 @@ def create_cbz_for_all(
     if not CLEAN_OUTPUT:
         console.print(f"[magenta]Created {cbz_name}[/]")
 
+    try:
+        hash_started = time.perf_counter()
+        archive_hash = hash_generator(cbz_name)
+        write_hash_to_database(archive_hash, cbz_name, os.path.basename(base_folder))
+        if not CLEAN_OUTPUT and os.environ.get("MDL_DEV_MODE") == "1":
+            elapsed = time.perf_counter() - hash_started
+            console.print(
+                f"[blue]XXH3-128 fingerprint: {archive_hash} (calculated in {elapsed:.2f}s)[/]"
+            )
+    except (OSError, sqlite3.Error) as exc:
+        console.print(f"[red]Error generating hash for {cbz_name}: {exc}[/]")
+
     _remove_archived_image_folders(base_folder, set(files_to_add.values()))
     _remove_empty_chapter_folders(base_folder)
     for archive in chapter_archives:
@@ -196,17 +203,12 @@ def _chapter_archive_files(
                 continue
             entries = [entry for entry in archive.infolist() if not entry.is_dir()]
             if not any(
-                Path(entry.filename).suffix.lower() in IMAGE_EXTENSIONS
-                for entry in entries
+                Path(entry.filename).suffix.lower() in IMAGE_EXTENSIONS for entry in entries
             ):
                 continue
             for entry in entries:
                 relative = PurePosixPath(entry.filename)
-                if (
-                    relative.is_absolute()
-                    or ".." in relative.parts
-                    or "\\" in entry.filename
-                ):
+                if relative.is_absolute() or ".." in relative.parts or "\\" in entry.filename:
                     raise ValueError(f"Invalid entry in {path}: {entry.filename}")
                 # Keep chapter metadata inside its chapter, alongside its pages.
                 files[f"{path.stem}/{entry.filename}"] = (str(path), entry.filename)
@@ -252,12 +254,8 @@ def create_cbz_per_chapter(
             continue
         destination = base / f"{chapter.name}.cbz"
         if destination.name == f"{sanitize_folder_name(base.name)}.cbz":
-            raise ValueError(
-                f"Chapter name conflicts with the series archive: {chapter.name}"
-            )
-        match = re.match(
-            r"(?:chapter|episode)[_ -]*(\d+(?:\.\d+)?)", chapter.name, re.I
-        )
+            raise ValueError(f"Chapter name conflicts with the series archive: {chapter.name}")
+        match = re.match(r"(?:chapter|episode)[_ -]*(\d+(?:\.\d+)?)", chapter.name, re.I)
         # Reading direction and language can be overridden per source or chapter.
         metadata = {
             "Title": chapter.name.replace("_", " "),
@@ -269,9 +267,7 @@ def create_cbz_per_chapter(
             **(chapter_metadata or {}).get(chapter.name, {}),
         }
         update_cbz(str(destination), files, metadata)
-        _remove_archived_image_folders(
-            str(base), set(files.values()), folders=[chapter.name]
-        )
+        _remove_archived_image_folders(str(base), set(files.values()), folders=[chapter.name])
         archives.append(str(destination))
         if not CLEAN_OUTPUT:
             console.print(f"[magenta]Created {destination}[/]")
@@ -311,9 +307,7 @@ def index_cbz_pages(
     if folders is None:
         candidates += sorted(path for path in base.glob("*.cbz") if path != legacy)
     else:
-        candidates += sorted(
-            {Path(str(Path(folder).resolve()) + ".cbz") for folder in folders}
-        )
+        candidates += sorted({Path(str(Path(folder).resolve()) + ".cbz") for folder in folders})
     result = {}
     for path in dict.fromkeys(candidates):
         if not path.is_file() or path.is_symlink() or path.parent != base:
@@ -361,8 +355,7 @@ def _remove_archived_image_folders(
         if not all(path in archived_files for path in files_in_folder):
             continue
         if not any(
-            os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS
-            for path in files_in_folder
+            os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS for path in files_in_folder
         ):
             continue
         try:
@@ -370,6 +363,4 @@ def _remove_archived_image_folders(
             if not CLEAN_OUTPUT:
                 console.print(f"[green]Removed archived image folder {folder}[/]")
         except OSError as exc:
-            console.print(
-                f"[yellow]Could not remove archived image folder {folder}: {exc}[/]"
-            )
+            console.print(f"[yellow]Could not remove archived image folder {folder}: {exc}[/]")

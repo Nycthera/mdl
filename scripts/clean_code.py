@@ -122,9 +122,7 @@ def main() -> int:
 
     removed, fixed = clean_codebase(root, args.apply)
     action = "Cleaned" if args.apply else "Found"
-    print(
-        f"{action}: {removed} generated item(s), {fixed} file(s) with whitespace issues."
-    )
+    print(f"{action}: {removed} generated item(s), {fixed} file(s) with whitespace issues.")
     if not args.apply and (removed or fixed):
         print("Run with --apply to perform these changes.")
     return 0

@@ -34,9 +34,7 @@ def optimize_image(path: str, mode: str) -> bool:
                 return False
             opened.load()
             metadata = {
-                key: opened.info[key]
-                for key in ("exif", "icc_profile")
-                if opened.info.get(key)
+                key: opened.info[key] for key in ("exif", "icc_profile") if opened.info.get(key)
             }
 
             if suffix in {".jpg", ".jpeg"}:

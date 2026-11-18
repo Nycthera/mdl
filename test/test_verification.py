@@ -106,9 +106,7 @@ async def test_repair_library_replaces_corrupt_cbz_page(tmp_path, monkeypatch):
             Path(folder, url.rsplit("/", 1)[-1]).write_bytes(_jpeg_bytes())
         return downloader.DownloadResult(len(urls), len(urls), [str(chapter)])
 
-    monkeypatch.setattr(
-        downloader, "download_all_pages", AsyncMock(side_effect=fake_download)
-    )
+    monkeypatch.setattr(downloader, "download_all_pages", AsyncMock(side_effect=fake_download))
     before, after = await verification.repair_library(str(root))
 
     assert len(before.issues) == 1
@@ -142,9 +140,7 @@ async def test_repair_library_redownloads_from_history(tmp_path, monkeypatch):
             Path(folder, url.rsplit("/", 1)[-1]).write_bytes(_jpeg_bytes())
         return downloader.DownloadResult(len(urls), len(urls), [str(chapter)])
 
-    monkeypatch.setattr(
-        downloader, "download_all_pages", AsyncMock(side_effect=fake_download)
-    )
+    monkeypatch.setattr(downloader, "download_all_pages", AsyncMock(side_effect=fake_download))
     before, after = await verification.repair_library(str(root), workers=2)
 
     assert len(before.issues) == 2

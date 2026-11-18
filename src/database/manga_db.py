@@ -28,11 +28,9 @@ DEFAULT_DB_PATH = _resolve_db_path(
         os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
     )
 )
-LEGACY_DB_PATH = _resolve_db_path(
-    os.path.join(os.path.dirname(__file__), "manga_collection.db")
-)
+LEGACY_DB_PATH = _resolve_db_path(os.path.join(os.path.dirname(__file__), "manga_collection.db"))
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 10_000
 
 SCHEMA_SQL = """
@@ -49,6 +47,7 @@ CREATE TABLE IF NOT EXISTS manga_data (
     source_id TEXT,
     language TEXT,
     output_path TEXT,
+    cbz_hash TEXT,
     UNIQUE (source_type, source_key)
 )
 """
@@ -215,9 +214,7 @@ def _has_unique_index(
 
 def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
     """Return whether the manga_data table needs to be rebuilt."""
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
     if cursor.fetchone() is None:
         return False
 
@@ -239,6 +236,7 @@ def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
         "source_id",
         "language",
         "output_path",
+        "cbz_hash",
     }
     return not required.issubset(columns) or not _has_unique_index(
         cursor, "manga_data", ("source_type", "source_key")
@@ -256,9 +254,7 @@ def _canonical_url(url: str | None) -> str | None:
     if not parts.scheme or not parts.netloc:
         return text
     path = parts.path.rstrip("/") or "/"
-    return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
-    )
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
 
 
 def _make_source_key(
@@ -293,6 +289,7 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
     source_id = "source_id" if "source_id" in columns else "NULL"
     language = "language" if "language" in columns else "NULL"
     output_path = "output_path" if "output_path" in columns else "NULL"
+    cbz_hash = "cbz_hash" if "cbz_hash" in columns else "NULL"
     source_key = (
         "COALESCE(NULLIF(TRIM(source_key), ''), LOWER(TRIM(manga_name)))"
         if "source_key" in columns
@@ -312,7 +309,8 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             source_url,
             source_id,
             language,
-            output_path
+            output_path,
+            cbz_hash
         )
         SELECT
             MIN(TRIM(manga_name)),
@@ -330,7 +328,8 @@ def _migrate_schema(connection: sqlite3.Connection) -> None:
             MAX({source_url}),
             MAX({source_id}),
             MAX({language}),
-            MAX({output_path})
+            MAX({output_path}),
+            MAX({cbz_hash})
         FROM manga_data_old
         WHERE manga_name IS NOT NULL AND TRIM(manga_name) != ''
         GROUP BY {source_type} COLLATE NOCASE, {source_key} COLLATE NOCASE
@@ -348,9 +347,7 @@ def _ensure_history_schema(cursor: sqlite3.Cursor) -> None:
 def _ensure_schema_connection(connection: sqlite3.Connection) -> None:
     """Create or migrate the schema using an existing connection."""
     cursor = connection.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
     if cursor.fetchone() is None:
         cursor.execute(SCHEMA_SQL)
     elif _schema_needs_migration(cursor):
@@ -423,6 +420,7 @@ def _upsert_manga(
     source_id: str | None,
     language: str | None,
     output_path: str | None,
+    cbz_hash: str | None = None,
 ) -> int:
     """Insert/update a source-specific title and return its row id."""
     row = cursor.execute(
@@ -430,8 +428,8 @@ def _upsert_manga(
         INSERT INTO manga_data (
             manga_name, date_last_checked, latest_chapter_local,
             latest_chapter_from_mangadex, source_type, source_key,
-            source_url, source_id, language, output_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            source_url, source_id, language, output_path, cbz_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(source_type, source_key) DO UPDATE SET
             manga_name = excluded.manga_name,
             date_last_checked = MAX(manga_data.date_last_checked, excluded.date_last_checked),
@@ -443,7 +441,8 @@ def _upsert_manga(
             source_url = COALESCE(excluded.source_url, manga_data.source_url),
             source_id = COALESCE(excluded.source_id, manga_data.source_id),
             language = COALESCE(excluded.language, manga_data.language),
-            output_path = COALESCE(excluded.output_path, manga_data.output_path)
+            output_path = COALESCE(excluded.output_path, manga_data.output_path),
+            cbz_hash = COALESCE(excluded.cbz_hash, manga_data.cbz_hash)
         RETURNING id
         """,
         (
@@ -457,6 +456,7 @@ def _upsert_manga(
             source_id,
             language,
             output_path,
+            cbz_hash,
         ),
     ).fetchone()
     return int(row[0])
@@ -473,6 +473,7 @@ def record_download(
     source_id: str | None = None,
     language: str | None = None,
     output_path: str | None = None,
+    cbz_hash: str | None = None,
 ) -> None:
     """Insert or update a manga entry after a successful download."""
     db_path = _resolve_db_path(db_path)
@@ -484,9 +485,7 @@ def record_download(
     source_id = source_id.strip() if source_id else None
     source_key = _make_source_key(manga_name, source_type, source_url, source_id)
     output_path = os.path.abspath(output_path) if output_path else None
-    latest_chapter_local = _normalize_chapter(
-        latest_chapter_local, "latest_chapter_local"
-    )
+    latest_chapter_local = _normalize_chapter(latest_chapter_local, "latest_chapter_local")
     latest_chapter_from_mangadex = _normalize_chapter(
         latest_chapter_from_mangadex, "latest_chapter_from_mangadex"
     )
@@ -515,6 +514,7 @@ def record_download(
             source_id=source_id,
             language=language,
             output_path=output_path,
+            cbz_hash=cbz_hash,
         )
     _db_log("Commit complete")
 
@@ -536,9 +536,7 @@ def record_download_from_folders(
     latest_local = infer_latest_chapter_from_folders(chapter_folders)
     _db_log(f"Inferred latest local chapter={latest_local}")
     latest_source = (
-        latest_local
-        if latest_chapter_from_mangadex is None
-        else latest_chapter_from_mangadex
+        latest_local if latest_chapter_from_mangadex is None else latest_chapter_from_mangadex
     )
     record_download(
         manga_name=manga_name,
@@ -685,27 +683,19 @@ def get_library_entry(selector: str, db_path: str = DEFAULT_DB_PATH) -> dict:
         try:
             manga_id = int(selector[3:])
         except ValueError:
-            raise ValueError(
-                "Use id:NUMBER, for example id:3, or an exact title."
-            ) from None
+            raise ValueError("Use id:NUMBER, for example id:3, or an exact title.") from None
         matches = [entry for entry in entries if entry["id"] == manga_id]
     else:
         matches = [
-            entry
-            for entry in entries
-            if entry["manga_name"].casefold() == selector.casefold()
+            entry for entry in entries if entry["manga_name"].casefold() == selector.casefold()
         ]
     if not matches:
         raise ValueError(
             f"No tracked title matches {selector!r}. Use 'library list' to see titles."
         )
     if len(matches) > 1:
-        choices = ", ".join(
-            f"id:{entry['id']} ({entry['source_type']})" for entry in matches
-        )
-        raise ValueError(
-            f"Multiple sources match {selector!r}; select one with {choices}."
-        )
+        choices = ", ".join(f"id:{entry['id']} ({entry['source_type']})" for entry in matches)
+        raise ValueError(f"Multiple sources match {selector!r}; select one with {choices}.")
     return matches[0]
 
 
@@ -863,3 +853,28 @@ def get_download_history(
         "failed_pages",
     )
     return [dict(zip(keys, row, strict=True)) for row in rows]
+
+
+def hash_generator(file: str) -> str:
+    """Generate a hexadecimal XXH3-128 local fingerprint for a CBZ file."""
+    import xxhash
+
+    digest = xxhash.xxh3_128()
+    with open(file, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def write_hash_to_database(
+    hash_string: str, file_path: str, manga_name: str, db_path: str = DEFAULT_DB_PATH
+) -> None:
+    """Store a CBZ fingerprint on its tracked manga record."""
+    db_path = _resolve_db_path(db_path)
+    with _database(db_path) as connection:
+        _ensure_schema_connection(connection)
+        connection.execute(
+            "UPDATE manga_data SET cbz_hash = ?, output_path = ? "
+            "WHERE manga_name = ? COLLATE NOCASE",
+            (hash_string, os.path.abspath(file_path), manga_name),
+        )
