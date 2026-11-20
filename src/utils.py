@@ -7,6 +7,7 @@ import shutil
 import sys
 from urllib.parse import urlparse
 
+import xxhash
 from rich.console import Console
 
 console = Console()
@@ -130,3 +131,13 @@ def image_filename(url: str) -> str:
     if re.fullmatch(r"CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]", name.split(".")[0], re.I):
         name = "_" + name
     return name
+
+
+def hash_generator(file: str) -> str:
+    """Generate a hexadecimal XXH3-128 local fingerprint for a CBZ file."""
+
+    digest = xxhash.xxh3_128()
+    with open(file, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

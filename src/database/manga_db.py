@@ -11,6 +11,7 @@ from contextlib import closing, contextmanager
 from math import isfinite
 from urllib.parse import urlsplit, urlunsplit
 
+xxhash
 from rich.console import Console
 
 from src.config import get_config_path
@@ -28,7 +29,9 @@ DEFAULT_DB_PATH = _resolve_db_path(
         os.path.join(os.path.dirname(get_config_path()), "manga_collection.db"),
     )
 )
-LEGACY_DB_PATH = _resolve_db_path(os.path.join(os.path.dirname(__file__), "manga_collection.db"))
+LEGACY_DB_PATH = _resolve_db_path(
+    os.path.join(os.path.dirname(__file__), "manga_collection.db")
+)
 
 SCHEMA_VERSION = 4
 BUSY_TIMEOUT_MS = 10_000
@@ -214,7 +217,9 @@ def _has_unique_index(
 
 def _schema_needs_migration(cursor: sqlite3.Cursor) -> bool:
     """Return whether the manga_data table needs to be rebuilt."""
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+    )
     if cursor.fetchone() is None:
         return False
 
@@ -254,7 +259,9 @@ def _canonical_url(url: str | None) -> str | None:
     if not parts.scheme or not parts.netloc:
         return text
     path = parts.path.rstrip("/") or "/"
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), path, parts.query, "")
+    )
 
 
 def _make_source_key(
@@ -347,7 +354,9 @@ def _ensure_history_schema(cursor: sqlite3.Cursor) -> None:
 def _ensure_schema_connection(connection: sqlite3.Connection) -> None:
     """Create or migrate the schema using an existing connection."""
     cursor = connection.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'")
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='manga_data'"
+    )
     if cursor.fetchone() is None:
         cursor.execute(SCHEMA_SQL)
     elif _schema_needs_migration(cursor):
@@ -485,7 +494,9 @@ def record_download(
     source_id = source_id.strip() if source_id else None
     source_key = _make_source_key(manga_name, source_type, source_url, source_id)
     output_path = os.path.abspath(output_path) if output_path else None
-    latest_chapter_local = _normalize_chapter(latest_chapter_local, "latest_chapter_local")
+    latest_chapter_local = _normalize_chapter(
+        latest_chapter_local, "latest_chapter_local"
+    )
     latest_chapter_from_mangadex = _normalize_chapter(
         latest_chapter_from_mangadex, "latest_chapter_from_mangadex"
     )
@@ -536,7 +547,9 @@ def record_download_from_folders(
     latest_local = infer_latest_chapter_from_folders(chapter_folders)
     _db_log(f"Inferred latest local chapter={latest_local}")
     latest_source = (
-        latest_local if latest_chapter_from_mangadex is None else latest_chapter_from_mangadex
+        latest_local
+        if latest_chapter_from_mangadex is None
+        else latest_chapter_from_mangadex
     )
     record_download(
         manga_name=manga_name,
@@ -683,19 +696,27 @@ def get_library_entry(selector: str, db_path: str = DEFAULT_DB_PATH) -> dict:
         try:
             manga_id = int(selector[3:])
         except ValueError:
-            raise ValueError("Use id:NUMBER, for example id:3, or an exact title.") from None
+            raise ValueError(
+                "Use id:NUMBER, for example id:3, or an exact title."
+            ) from None
         matches = [entry for entry in entries if entry["id"] == manga_id]
     else:
         matches = [
-            entry for entry in entries if entry["manga_name"].casefold() == selector.casefold()
+            entry
+            for entry in entries
+            if entry["manga_name"].casefold() == selector.casefold()
         ]
     if not matches:
         raise ValueError(
             f"No tracked title matches {selector!r}. Use 'library list' to see titles."
         )
     if len(matches) > 1:
-        choices = ", ".join(f"id:{entry['id']} ({entry['source_type']})" for entry in matches)
-        raise ValueError(f"Multiple sources match {selector!r}; select one with {choices}.")
+        choices = ", ".join(
+            f"id:{entry['id']} ({entry['source_type']})" for entry in matches
+        )
+        raise ValueError(
+            f"Multiple sources match {selector!r}; select one with {choices}."
+        )
     return matches[0]
 
 
@@ -854,16 +875,6 @@ def get_download_history(
     )
     return [dict(zip(keys, row, strict=True)) for row in rows]
 
-
-def hash_generator(file: str) -> str:
-    """Generate a hexadecimal XXH3-128 local fingerprint for a CBZ file."""
-    import xxhash
-
-    digest = xxhash.xxh3_128()
-    with open(file, "rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def write_hash_to_database(
