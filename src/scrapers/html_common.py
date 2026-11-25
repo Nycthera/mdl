@@ -5,12 +5,9 @@ import re
 
 import aiohttp
 
-from src.http import (
-    classify_failure,
-    compute_backoff,
-    get_default_timeout,
-    redirect_target,
-)
+from src.network.client import get_default_timeout
+from src.network.retry import classify_failure, compute_backoff
+from src.network.urls import redirect_target
 from src.utils import _cancel_pending_tasks
 
 

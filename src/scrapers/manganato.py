@@ -29,7 +29,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from src.http import build_session, validate_http_url
+from src.network.client import build_session
+from src.network.urls import validate_http_url
 from src.scrapers.html_common import collect_chapters
 from src.scrapers.html_common import fetch_html as _fetch_html
 

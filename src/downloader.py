@@ -1,600 +1,65 @@
-"""Image downloading functionality.
+"""Compatibility facade for the focused ``src.downloads`` package."""
+# ruff: noqa: F401
 
-Speed wins ported from AIO-Webtoon-Downloader:
-  * Classified retry (4 buckets: rate_limit / origin_error / retryable / permanent)
-    so 429, CF 520-527, network blips, and 4xx are retried with the right policy.
-  * Exponential backoff with jitter (was linear: 1s, 2s, 3s, 4s).
-  * Per-host AIMD concurrency cap — bad hosts back off without crippling the run.
-  * Async file writes via asyncio.to_thread — event loop is never blocked on disk.
-  * Atomic .pending_<name> + os.replace — partial downloads never appear at the
-    final path, so a crash mid-write leaves only .pending_* files.
-  * Tuned TCPConnector (keepalive, ttl=30, enable_cleanup_closed).
-"""
-
-import asyncio
-import os
-import sqlite3
-from collections import defaultdict
-from contextlib import asynccontextmanager
-from dataclasses import dataclass
-
-import aiohttp
-from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-    TimeRemainingColumn,
+from src.downloads import batch as _batch
+from src.downloads import single as _single
+from src.downloads.batch import (
+    AdaptiveHostLimiter,
+    DownloadResult,
+    _build_connector,
+    _download_failed,
+    _get_trackable_chapter_folders,
+    _persist_run_history,
 )
+from src.downloads.single import url_exists
+from src.downloads.support import _history_status
 
-from src.database.manga_db import (
-    begin_download_run,
-    finish_download_run,
-    record_download_from_folders,
-    record_page_results,
-)
-from src.http import (
-    HEAD_TIMEOUT,
-    PublicAddressResolver,
-    classify_failure,
-    compute_backoff,
-    download_image_streaming,
-    get_default_timeout,
-    get_host_cap,
-    redirect_target,
-    validate_http_url,
-)
-from src.utils import Colors, _cancel_pending_tasks, _loop_time, image_filename
-
-console = Console()
-
-# Global state for interruption handling
 stop_signal = False
 CLEAN_OUTPUT = False
 DEV_MODE = False
 
 
 def set_clean_output(value: bool) -> None:
-    """Set the clean output mode globally."""
     global CLEAN_OUTPUT
     CLEAN_OUTPUT = value
+    from src.downloads import batch
+
+    batch.CLEAN_OUTPUT = value
 
 
 def set_dev_mode(value: bool) -> None:
-    """Set developer debug mode globally."""
     global DEV_MODE
     DEV_MODE = value
+    from src.downloads import batch
+
+    batch.DEV_MODE = value
 
 
 def set_stop_signal(value: bool) -> None:
-    """Set the stop signal globally."""
     global stop_signal
     stop_signal = value
+    from src.downloads import batch
+
+    batch.stop_signal = value
+    from src.downloads.single import set_stop_signal as set_single_stop_signal
+
+    set_single_stop_signal(value)
 
 
 def _is_stopped() -> bool:
     return stop_signal
 
 
-async def url_exists(session: aiohttp.ClientSession, url: str) -> bool:
-    """Check if a URL exists with a HEAD request."""
-    try:
-        current_url = validate_http_url(url)
-        for _ in range(10):
-            async with session.head(
-                current_url,
-                allow_redirects=False,
-                timeout=HEAD_TIMEOUT,
-            ) as response:
-                if response.status in {301, 302, 303, 307, 308}:
-                    current_url = redirect_target(current_url, response.headers.get("Location"))
-                    continue
-                return response.status == 200
-    except (aiohttp.ClientError, TimeoutError, ValueError, OSError):
-        return False
-    return False
+async def download_image(*args, **kwargs):
+    """Forward to the focused implementation using legacy module state."""
+    _single.stop_signal = stop_signal
+    return await _single.download_image(*args, **kwargs)
 
 
-def _write_file_sync(filepath: str, data: bytes) -> None:
-    """Synchronous write helper — runs in a worker thread via asyncio.to_thread."""
-    with open(filepath, "wb") as f:
-        f.write(data)
-
-
-async def download_image(
-    url: str,
-    folder: str,
-    session: aiohttp.ClientSession,
-    max_retries: int = 5,
-    backoff_factor: float = 1.0,
-    referer: str | None = None,
-) -> str:
-    """Download a single image with classified retry + async writes + atomic rename.
-
-    Interface preserved for backward compatibility: returns a human-readable
-    status string (used by tests and by _download_failed()).
-    """
-    if stop_signal:
-        return f"{Colors.RED}Download interrupted{Colors.RESET}"
-    try:
-        validate_http_url(url)
-    except ValueError as exc:
-        return f"{Colors.RED}Unsafe URL: {exc}{Colors.RESET}"
-
-    os.makedirs(folder, exist_ok=True)
-    filename = image_filename(url)
-    filepath = os.path.join(folder, filename)
-
-    if os.path.exists(filepath):
-        return f"{Colors.YELLOW}Already downloaded: {filename}{Colors.RESET}"
-
-    pending_path = os.path.join(folder, f".pending_{filename}")
-    # Clean up any stale .pending from a previous interrupted run.
-    if os.path.exists(pending_path):
-        try:
-            os.remove(pending_path)
-        except OSError:
-            pass
-
-    host_cap = get_host_cap()
-    headers = {"Referer": referer} if referer else None
-
-    last_error = "unknown"
-    for attempt in range(1, max_retries + 1):
-        if stop_signal:
-            return f"{Colors.RED}Download interrupted{Colors.RESET}"
-        try:
-            async with session.get(
-                url,
-                timeout=get_default_timeout(),
-                headers=headers,
-                allow_redirects=False,
-            ) as r:
-                if r.status in {301, 302, 303, 307, 308}:
-                    return f"{Colors.RED}Unsafe redirect rejected for {filename}{Colors.RESET}"
-                if r.status >= 400:
-                    # Best-effort body sniff for Cloudflare classification.
-                    body_snippet = b""
-                    if r.status in (403, 503):
-                        try:
-                            body_snippet = await r.content.read(4096)
-                        except Exception:
-                            body_snippet = b""
-                    cls = classify_failure(r.status, body_snippet=body_snippet)
-                    host_cap.record_failure(url, cls)
-                    last_error = f"HTTP {r.status}"
-                    if cls == "permanent" or attempt == max_retries:
-                        return (
-                            f"{Colors.RED}Failed to download {filename} after "
-                            f"{max_retries} attempts: HTTP {r.status}{Colors.RESET}"
-                        )
-                    await asyncio.sleep(compute_backoff(cls, attempt, backoff_factor))
-                    continue
-
-                # Buffer the response (typical manga page < 2 MB).
-                content = await r.read()
-
-                if not content:
-                    host_cap.record_failure(url, "retryable")
-                    last_error = "empty response"
-                    if attempt == max_retries:
-                        return (
-                            f"{Colors.RED}Failed to download {filename} after "
-                            f"{max_retries} attempts: empty response{Colors.RESET}"
-                        )
-                    await asyncio.sleep(compute_backoff("retryable", attempt, backoff_factor))
-                    continue
-
-                # Atomic write: pending tempfile -> os.replace to final path.
-                # The disk I/O runs in a thread so the event loop stays free.
-                await asyncio.to_thread(_write_file_sync, pending_path, content)
-                await asyncio.to_thread(os.replace, pending_path, filepath)
-                host_cap.record_success(url)
-                return f"{Colors.GREEN}Saved as {filepath}{Colors.RESET}"
-
-        except TimeoutError as e:
-            host_cap.record_failure(url, "retryable")
-            last_error = f"timeout: {e}"
-            if attempt == max_retries:
-                return (
-                    f"{Colors.RED}Failed to download {filename} after "
-                    f"{max_retries} attempts: {e}{Colors.RESET}"
-                )
-            await asyncio.sleep(compute_backoff("retryable", attempt, backoff_factor))
-        except aiohttp.ClientError as e:
-            cls = classify_failure(None, exc=e)
-            host_cap.record_failure(url, cls)
-            last_error = str(e)
-            if cls == "permanent" or attempt == max_retries:
-                return (
-                    f"{Colors.RED}Failed to download {filename} after "
-                    f"{max_retries} attempts: {e}{Colors.RESET}"
-                )
-            await asyncio.sleep(compute_backoff(cls, attempt, backoff_factor))
-        except Exception as e:
-            last_error = f"unexpected: {e}"
-            if attempt == max_retries:
-                return f"{Colors.RED}Unexpected error for {filename}: {e}{Colors.RESET}"
-            await asyncio.sleep(compute_backoff("retryable", attempt, backoff_factor))
-
-    return (
-        f"{Colors.RED}Failed to download {filename} after "
-        f"{max_retries} attempts: {last_error}{Colors.RESET}"
-    )
-
-
-# Backward-compat: some callers may import download_image_streaming from here.
-__all__ = [
-    "download_image",
-    "download_image_streaming",
-    "url_exists",
-    "download_all_pages",
-    "set_clean_output",
-    "set_dev_mode",
-    "set_stop_signal",
-]
-
-
-def _download_failed(result: str) -> bool:
-    """Return whether a download result represents a failed page."""
-    lowered = result.lower()
-    return (
-        "failed to download" in lowered
-        or "unexpected error" in lowered
-        or "download interrupted" in lowered
-        or "unsafe url" in lowered
-        or "unsafe redirect" in lowered
-    )
-
-
-def _get_trackable_chapter_folders(
-    urls_to_download: list[tuple[str, str]],
-    page_results: dict[tuple[str, str], str],
-) -> list[str]:
-    """Return the fully completed contiguous chapter folders from the queue start."""
-    expected_pages: dict[str, int] = defaultdict(int)
-    successful_pages: dict[str, int] = defaultdict(int)
-    folder_order: list[str] = []
-
-    for item in urls_to_download:
-        _, folder = item
-        if folder not in expected_pages:
-            folder_order.append(folder)
-        expected_pages[folder] += 1
-        result = page_results.get(item)
-        if result is not None and not _download_failed(result):
-            successful_pages[folder] += 1
-
-    completed_folders: list[str] = []
-    for folder in folder_order:
-        if successful_pages[folder] != expected_pages[folder]:
-            break
-        completed_folders.append(folder)
-    return completed_folders
-
-
-def _build_connector(max_workers: int) -> aiohttp.TCPConnector:
-    """Construct a tuned TCPConnector sized for the requested worker count.
-
-    - limit = max_workers * 2 (ceiling 64 to avoid socket exhaustion)
-    - limit_per_host = max_workers (so one host can't starve others)
-    - keepalive enabled for 30s with a 5-minute DNS cache
-    """
-    limit = max(8, min(64, max_workers * 2))
-    limit_per_host = max(1, min(limit, max_workers))
-    return aiohttp.TCPConnector(
-        limit=limit,
-        limit_per_host=limit_per_host,
-        keepalive_timeout=30,
-        ttl_dns_cache=300,
-        force_close=False,
-        resolver=PublicAddressResolver(),
-    )
-
-
-@dataclass
-class DownloadResult:
-    successful_pages: int
-    total_pages: int
-    completed_folders: list[str]
-    discovery_complete: bool = True
-
-    @property
-    def complete(self) -> bool:
-        return self.discovery_complete and self.successful_pages == self.total_pages
-
-
-class AdaptiveHostLimiter:
-    """Async gate that enforces the live per-host AIMD concurrency cap."""
-
-    def __init__(self, base_limit: int):
-        self._base_limit = max(1, int(base_limit))
-        self._active: dict[str, int] = defaultdict(int)
-        self._condition = asyncio.Condition()
-        self._caps = get_host_cap()
-
-    @asynccontextmanager
-    async def slot(self, url: str):
-        host = self._caps.host_of(url)
-        async with self._condition:
-            while self._active[host] >= self._caps.effective(url, self._base_limit):
-                await self._condition.wait()
-            self._active[host] += 1
-        try:
-            yield
-        finally:
-            async with self._condition:
-                self._active[host] -= 1
-                self._condition.notify_all()
-
-
-def _history_status(result: str) -> str:
-    lowered = result.lower()
-    if "already downloaded" in lowered:
-        return "existing"
-    if "interrupted" in lowered:
-        return "interrupted"
-    if _download_failed(result):
-        return "failed"
-    return "saved"
-
-
-async def _persist_run_history(
-    run_id: int,
-    page_results: dict[tuple[str, str], str],
-    total_pages: int,
-    *,
-    interrupted: bool,
-) -> None:
-    """Persist collected page outcomes and close a durable run."""
-    successful_pages = sum(not _download_failed(value) for value in page_results.values())
-    history_rows = [
-        (
-            url,
-            folder,
-            os.path.join(folder, image_filename(url)),
-            _history_status(result),
-            result,
-        )
-        for (url, folder), result in page_results.items()
-    ]
-    await asyncio.to_thread(record_page_results, run_id, history_rows)
-    await asyncio.to_thread(
-        finish_download_run,
-        run_id,
-        successful_pages=successful_pages,
-        failed_pages=total_pages - successful_pages,
-        interrupted=interrupted,
-    )
-
-
-async def download_all_pages(
-    urls_to_download: list[tuple[str, str]],
-    max_workers: int = 10,
-    manga_name: str = "manga",
-    track_to_db: bool = True,
-    max_retries: int = 5,
-    referer: str | None = None,
-    session: aiohttp.ClientSession | None = None,
-    source_type: str = "generic",
-    source_url: str | None = None,
-    source_id: str | None = None,
-    language: str | None = None,
-    output_path: str | None = None,
-    track_history: bool | None = None,
-    optimize_mode: str = "off",
-    skip_archived: bool = False,
-) -> DownloadResult:
-    """Download all pages with progress tracking.
-
-    Set track_to_db=False when the caller will handle a single consolidated DB write.
-    Set referer=... for sources with anti-hotlink protection (e.g. Webtoons).
-    Pass a session to reuse an existing connection pool across chapter batches.
-    """
-    if optimize_mode not in {"off", "lossless", "balanced", "small"}:
-        raise ValueError(f"Unknown image optimization mode: {optimize_mode}")
-    optimize_page = None
-    if optimize_mode != "off":
-        from src.image_optimizer import optimize_image
-
-        optimize_page = optimize_image
-
-    urls_to_download = list(dict.fromkeys(urls_to_download))
-    total_pages = len(urls_to_download)
-    if total_pages == 0:
-        return DownloadResult(0, 0, [])
-
-    if output_path is None:
-        folders = [os.path.abspath(folder) for _, folder in urls_to_download]
-        output_path = os.path.commonpath(folders)
-        if len(set(folders)) == 1:
-            output_path = os.path.dirname(output_path)
-
-    archived_pages = {}
-    if skip_archived:
-        from src.cbz import index_cbz_pages
-
-        archived_pages = await asyncio.to_thread(
-            index_cbz_pages,
-            output_path,
-            folders={folder for _, folder in urls_to_download},
-        )
-    for url, folder in urls_to_download:
-        if os.path.realpath(os.path.join(folder, image_filename(url))) not in archived_pages:
-            os.makedirs(folder, exist_ok=True)
-
-    # Tune the AIMD baseline to match the requested worker count and enforce
-    # its changing per-host limits in the live scheduler.
-    host_cap = get_host_cap()
-    host_cap.set_baseline(max_workers)
-    host_limiter = AdaptiveHostLimiter(max_workers)
-
-    should_track_history = track_to_db if track_history is None else track_history
-    run_id: int | None = None
-    if should_track_history:
-        try:
-            run_id = await asyncio.to_thread(
-                begin_download_run,
-                manga_name,
-                total_pages,
-                source_type=source_type,
-                source_url=source_url,
-                source_id=source_id,
-                language=language,
-                output_path=output_path,
-            )
-        except (sqlite3.Error, OSError, ValueError):
-            run_id = None
-
-    owns_session = session is None
-    if session is None:
-        connector = _build_connector(max_workers)
-        session = aiohttp.ClientSession(connector=connector)
-
-    page_results: dict[tuple[str, str], str] = {}
-    try:
-        sem = asyncio.Semaphore(max(1, max_workers))
-        optimize_sem = asyncio.Semaphore(max(1, min(4, os.cpu_count() or 1)))
-
-        async def download_worker(args: tuple[str, str]) -> tuple[tuple[str, str], str]:
-            url, folder = args
-            if (
-                not stop_signal
-                and os.path.realpath(os.path.join(folder, image_filename(url))) in archived_pages
-            ):
-                return args, f"Already downloaded (CBZ): {image_filename(url)}"
-            async with host_limiter.slot(url):
-                async with sem:
-                    result = await download_image(
-                        url,
-                        folder,
-                        session=session,
-                        max_retries=max_retries,
-                        referer=referer,
-                    )
-            # Network slots are released before encoding; the next pages can
-            # download while a bounded number of completed pages are optimized.
-            if optimize_page is not None and "saved as" in result.lower():
-                async with optimize_sem:
-                    await asyncio.to_thread(
-                        optimize_page,
-                        os.path.join(folder, image_filename(url)),
-                        optimize_mode,
-                    )
-            return args, result
-
-        tasks = [asyncio.create_task(download_worker(item)) for item in urls_to_download]
-
-        try:
-            if not CLEAN_OUTPUT:
-                with Progress(
-                    SpinnerColumn(style="green"),
-                    TextColumn("[bold green]Downloading[/]"),
-                    BarColumn(),
-                    "[progress.percentage]{task.percentage:>3.1f}%",
-                    "•",
-                    TextColumn("{task.fields[pages_per_sec]} pages/sec"),
-                    TimeElapsedColumn(),
-                    TimeRemainingColumn(),
-                    console=console,
-                    transient=True,
-                ) as progress:
-                    task = progress.add_task("Downloading", total=total_pages, pages_per_sec="0.0")
-
-                    start_time = _loop_time()
-                    completed = 0
-                    for future in asyncio.as_completed(tasks):
-                        item, result = await future
-                        page_results[item] = result
-                        completed += 1
-                        if stop_signal:
-                            await _cancel_pending_tasks(tasks)
-                            break
-                        elapsed = max(_loop_time() - start_time, 0.001)
-                        pps = completed / elapsed
-                        progress.update(task, advance=1, pages_per_sec=f"{pps:.2f}")
-                        if "Failed" in result or "HTTP" in result:
-                            console.print(result)
-            else:
-                for future in asyncio.as_completed(tasks):
-                    item, result = await future
-                    page_results[item] = result
-                    if stop_signal:
-                        await _cancel_pending_tasks(tasks)
-                        break
-
-        finally:
-            await _cancel_pending_tasks(tasks)
-    except asyncio.CancelledError:
-        if run_id is not None:
-            try:
-                await asyncio.shield(
-                    _persist_run_history(
-                        run_id,
-                        page_results,
-                        total_pages,
-                        interrupted=True,
-                    )
-                )
-            except (sqlite3.Error, OSError):
-                pass
-        raise
-    finally:
-        if owns_session:
-            await session.close()
-
-    if track_to_db and not stop_signal and urls_to_download:
-        try:
-            chapter_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
-            if DEV_MODE and not CLEAN_OUTPUT:
-                console.print(
-                    f"[bold blue][db][/bold blue] Triggering save from downloader for '{manga_name}'"
-                )
-            if chapter_folders:
-                # SQLite calls are synchronous — run them in a thread so the
-                # event loop is not blocked during the DB write.
-                await asyncio.to_thread(
-                    record_download_from_folders,
-                    manga_name=manga_name,
-                    chapter_folders=chapter_folders,
-                    source_type=source_type,
-                    source_url=source_url,
-                    source_id=source_id,
-                    language=language,
-                    output_path=output_path,
-                )
-            elif DEV_MODE and not CLEAN_OUTPUT:
-                console.print(
-                    f"[bold blue][db][/bold blue] No fully completed contiguous chapters for '{manga_name}', skipping save"
-                )
-            if DEV_MODE and not CLEAN_OUTPUT:
-                console.print(
-                    f"[bold blue][db][/bold blue] Downloader save finished for '{manga_name}'"
-                )
-        except (sqlite3.Error, OSError, ValueError) as exc:
-            # DB tracking should not block downloads.
-            if not CLEAN_OUTPUT:
-                console.print(
-                    f"{Colors.YELLOW}Warning: Could not write download metadata for {manga_name}: {exc}{Colors.RESET}"
-                )
-    elif track_to_db and DEV_MODE and not stop_signal and not CLEAN_OUTPUT:
-        console.print(
-            f"[bold blue][db][/bold blue] Skipping save for '{manga_name}' because no pages were queued"
-        )
-
-    successful_pages = sum(not _download_failed(value) for value in page_results.values())
-    if run_id is not None:
-        try:
-            await _persist_run_history(
-                run_id,
-                page_results,
-                total_pages,
-                interrupted=stop_signal,
-            )
-        except (sqlite3.Error, OSError):
-            pass
-
-    completed_folders = _get_trackable_chapter_folders(urls_to_download, page_results)
-    return DownloadResult(successful_pages, total_pages, completed_folders)
+async def download_all_pages(*args, **kwargs):
+    """Forward to the batch scheduler using legacy module state."""
+    _batch.stop_signal = stop_signal
+    _batch.CLEAN_OUTPUT = CLEAN_OUTPUT
+    _batch.DEV_MODE = DEV_MODE
+    _single.stop_signal = stop_signal
+    return await _batch.download_all_pages(*args, **kwargs)

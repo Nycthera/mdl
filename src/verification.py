@@ -152,7 +152,7 @@ async def repair_library(
     max_retries: int = 5,
 ) -> tuple[VerificationReport, VerificationReport]:
     """Redownload missing/corrupt pages whose original URLs exist in history."""
-    from src.downloader import download_all_pages
+    from src.downloads.batch import download_all_pages
 
     before = verify_library(root)
     repairable = [issue for issue in before.issues if issue.url]

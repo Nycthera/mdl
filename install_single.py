@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-# Sources stay in separate module namespaces, preserving imports and globals.
+# Sources stay in separate module namespaces, preserving package imports and globals.
 BOOTSTRAP = r"""
 import importlib.abc
 import importlib.util
@@ -69,7 +69,8 @@ if __name__ == "__main__":
 def build(output: Path, python: str | None = None) -> None:
     """Collect application source, validate it, and atomically write a bundle."""
     sources = {}
-    for path in sorted((ROOT / "src").rglob("*.py")):
+    source_root = ROOT / "src"
+    for path in sorted(source_root.rglob("*.py")):
         relative = path.relative_to(ROOT).as_posix()
         with tokenize.open(path) as stream:
             source = stream.read()
@@ -80,6 +81,18 @@ def build(output: Path, python: str | None = None) -> None:
         sources[".".join(parts)] = (relative, source)
     if "src" not in sources:
         raise ValueError("Missing src/__init__.py; run from a complete checkout")
+    required_packages = (
+        "src.database",
+        "src.network",
+        "src.downloads",
+        "src.archives",
+    )
+    missing_packages = [name for name in required_packages if name not in sources]
+    if missing_packages:
+        raise ValueError(
+            "Missing application packages required by the modular source tree: "
+            + ", ".join(missing_packages)
+        )
     with tokenize.open(ROOT / "main.py") as stream:
         main_source = stream.read()
     compile(main_source, "main.py", "exec")

@@ -12,12 +12,9 @@ from rich.console import Console
 
 from src.cbz import create_cbz_for_all
 from src.database.manga_db import record_download
-from src.downloader import DownloadResult, download_all_pages
-from src.http import (
-    classify_failure,
-    compute_backoff,
-    get_default_timeout,
-)
+from src.downloads.batch import DownloadResult, download_all_pages
+from src.network.client import get_default_timeout
+from src.network.retry import classify_failure, compute_backoff
 from src.output_formats import create_output_for_all
 from src.rate_limiter import rate_limiter_athome
 from src.utils import sanitize_folder_name
@@ -262,7 +259,7 @@ async def download_md_chapters(
 
     # Single shared session across all MangaDex API + at-home calls —
     # HTTP keep-alive amortizes TLS handshakes across the whole run.
-    from src.downloader import _build_connector
+    from src.downloads.batch import _build_connector
 
     connector = _build_connector(max_workers)
     async with aiohttp.ClientSession(connector=connector) as session:

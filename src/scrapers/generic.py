@@ -5,8 +5,8 @@ import asyncio
 import aiohttp
 from rich.console import Console
 
-from src.downloader import url_exists
-from src.http import PublicAddressResolver
+from src.downloads.single import url_exists
+from src.network.urls import PublicAddressResolver
 from src.scrapers import _collect_chapter_urls_for_download
 from src.scrapers import set_clean_output as set_scraper_clean_output
 from src.utils import sanitize_folder_name
